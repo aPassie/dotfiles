@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=KDE Connect Daemon (disabled)
+Hidden=true
+X-GNOME-Autostart-enabled=false

@@ -1,0 +1,15 @@
+[Default Applications]
+text/html=google-chrome.desktop
+x-scheme-handler/http=google-chrome.desktop
+x-scheme-handler/https=google-chrome.desktop
+x-scheme-handler/about=google-chrome.desktop
+x-scheme-handler/unknown=google-chrome.desktop
+text/x-shellscript=vim.desktop
+text/x-python=vim.desktop
+text/x-script.python=vim.desktop
+x-scheme-handler/fdm=freedownloadmanager_fdm_up.desktop
+x-scheme-handler/magnet=freedownloadmanager_magnet_up.desktop
+application/x-bittorrent=freedownloadmanager_torrent.desktop
+
+[Added Associations]
+text/markdown=com.brave.Origin.beta.desktop;

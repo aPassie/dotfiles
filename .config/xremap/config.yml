@@ -1,0 +1,6 @@
+keymap:
+  - name: nautilus-backspace-up
+    application:
+      only: [org.gnome.Nautilus]
+    remap:
+      Backspace: Alt-Up

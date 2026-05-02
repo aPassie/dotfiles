@@ -1,0 +1,49 @@
+// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+  "disable_ai": true,
+  "session": {
+    "trust_all_worktrees": true
+  },
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  },
+  "ui_font_size": 16,
+  "buffer_font_size": 15,
+  "theme": {
+    "mode": "system",
+    "light": "Ayu Light",
+    "dark": "Ayu Dark",
+  },
+
+  // ── Battery / idle-power tweaks ────────────────────────────────────────────
+  "cursor_blink": true,
+
+  // Don't poll GitHub for updates in the background.
+  // Update via `zed --update` or the standalone installer.
+  "auto_update": false,
+
+  // Don't auto-update extensions on startup; do it manually when you want.
+  "auto_install_extensions": {},
+
+  // Skip indexing common heavy directories — saves CPU + inotify watches.
+  "file_scan_exclusions": [
+    "**/.git",
+    "**/node_modules",
+    "**/target",
+    "**/dist",
+    "**/build",
+    "**/.cache",
+    "**/__pycache__",
+    "**/.venv",
+    "**/.mypy_cache",
+    "**/.pytest_cache"
+  ],
+}

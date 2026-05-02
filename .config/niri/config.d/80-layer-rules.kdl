@@ -1,0 +1,27 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// 80 — Layer rules
+// ─────────────────────────────────────────────────────────────────────────────
+// Docs: https://niri-wm.github.io/niri/Configuration:-Layer-Rules
+//
+// Layer-shell surfaces are used by bars, panels, wallpaper renderers, and
+// overlays. Use rules here to tweak how specific surfaces are placed,
+// composited, or blocked from screen capture.
+//
+// place-within-backdrop = true renders the surface behind windows but above
+// the compositor background — the typical setup for shell wallpaper layers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// (No active layer rules — add per-shell rules here when a bar/panel needs them.)
+
+// ── Examples ────────────────────────────────────────────────────────────────
+// Make a specific layer surface semi-transparent:
+// layer-rule {
+//     match namespace="waybar"
+//     opacity 0.9
+// }
+//
+// Block a layer surface from screen capture:
+// layer-rule {
+//     match namespace="some-private-overlay"
+//     block-out-from "screencast"
+// }
