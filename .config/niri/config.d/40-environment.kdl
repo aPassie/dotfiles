@@ -20,18 +20,10 @@ environment {
     // Let Electron apps (Chrome, VS Code, Discord) pick Wayland automatically.
     ELECTRON_OZONE_PLATFORM_HINT "auto"
 
-    // Silence noisy Quickshell D-Bus property logs.
-    QT_LOGGING_RULES "quickshell.dbus.properties=false"
-
     // Qt theming: "kde" reads colors from kdeglobals (requires plasma-integration).
     // If plasma-integration is not installed, change this to "qt6ct".
     QT_QPA_PLATFORMTHEME "kde"
 
     // Darkly is a modern Qt style that follows kdeglobals color schemes.
     QT_STYLE_OVERRIDE "Darkly"
-
-    // Tell Noctalia to use /etc/pam.d/noctalia for lock-screen auth.
-    // Without this, it falls back to /etc/pam.d/login (TTY-style) which can
-    // unlock without prompting.
-    NOCTALIA_PAM_SERVICE "noctalia"
 }

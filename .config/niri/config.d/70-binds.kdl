@@ -11,15 +11,13 @@ binds {
     // ── Apps ────────────────────────────────────────────────────────────────
     Mod+T      hotkey-overlay-title="Open a Terminal: foot" { spawn "footclient"; }
     Mod+Return hotkey-overlay-title="Open a Terminal: foot" { spawn "footclient"; }
-    Mod+Space  hotkey-overlay-title="App Launcher"          { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "launcher" "toggle"; }
     Mod+E      hotkey-overlay-title="File Manager: nautilus" { spawn "nautilus"; }
     Mod+Q      hotkey-overlay-title="Close Window"          { close-window; }
 
-    // ── Noctalia panels ─────────────────────────────────────────────────────
-    Mod+P      hotkey-overlay-title="Control Center"        { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "controlCenter" "toggle"; }
-    Mod+N      hotkey-overlay-title="Notification History"  { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "notifications" "toggleHistory"; }
-    Mod+I      hotkey-overlay-title="Idle Inhibitor (Caffeine)" { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "idleInhibitor" "toggle"; }
-    Mod+Y      hotkey-overlay-title="Clipboard history"        { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "launcher" "clipboard"; }
+    // ── Shell panels ────────────────────────────────────────────────────────
+    // Mod+Space, Mod+P, Mod+N, Mod+I, Mod+Y are unbound after noctalia removal.
+    // Re-bind them when a replacement launcher / control center / notifications /
+    // idle-inhibitor / clipboard tool is picked.
 
     // ── Audio ───────────────────────────────────────────────────────────────
     XF86AudioRaiseVolume allow-when-locked=true { spawn "wpctl" "set-volume" "-l" "1.5" "@DEFAULT_AUDIO_SINK@" "5%+"; }
@@ -124,7 +122,7 @@ binds {
     Mod+W { toggle-column-tabbed-display; }
 
     // ── Lock ────────────────────────────────────────────────────────────────
-    Mod+Alt+L hotkey-overlay-title="Lock Screen" { spawn "hyprlock"; }
+    // Mod+Alt+L was bound to hyprlock; rebind when a replacement locker is picked.
 }
 
 // ── Alt+Tab (built-in recent-windows) ───────────────────────────────────────
