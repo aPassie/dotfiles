@@ -1,9 +1,12 @@
 [StreamInputs]
-inputDevice=alsa_input.pci-0000_05_00.6.analog-stereo
+inputDevice=bluez_input.B0:38:E2:51:26:76
 
 [StreamOutputs]
-outputDevice=alsa_output.pci-0000_05_00.6.analog-stereo
+outputDevice=bluez_output.B0_38_E2_51_26_76.1
 
 [Window]
-height=1027
-width=853
+height=1248
+visiblePage=pwPage
+visiblePipeWirePage=testSignalsPage
+visiblePresetSheetPage=autoloadingPage
+width=1024

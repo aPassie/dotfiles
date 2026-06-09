@@ -7,7 +7,12 @@
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
-  "disable_ai": true,
+  "agent": {
+    "sidebar_side": "right",
+    "favorite_models": [],
+    "model_parameters": []
+  },
+  "disable_ai": false,
   "session": {
     "trust_all_worktrees": true
   },
@@ -20,7 +25,7 @@
   "theme": {
     "mode": "system",
     "light": "Ayu Light",
-    "dark": "Ayu Dark",
+    "dark": "macOS Classic Dark",
   },
 
   // ── Battery / idle-power tweaks ────────────────────────────────────────────

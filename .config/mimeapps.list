@@ -10,6 +10,13 @@ text/x-script.python=vim.desktop
 x-scheme-handler/fdm=freedownloadmanager_fdm_up.desktop
 x-scheme-handler/magnet=freedownloadmanager_magnet_up.desktop
 application/x-bittorrent=freedownloadmanager_torrent.desktop
+video/x-matroska=vlc.desktop
+video/mp4=vlc.desktop
+x-scheme-handler/antigravity=antigravity.desktop
+x-scheme-handler/claude-cli=claude-code-url-handler.desktop
+inode/directory=org.kde.dolphin.desktop
 
 [Added Associations]
 text/markdown=com.brave.Origin.beta.desktop;
+video/x-matroska=vlc.desktop;
+video/mp4=vlc.desktop;

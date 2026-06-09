@@ -21,3 +21,13 @@ spawn-at-startup "bash" "-c" "wl-paste --type image --watch cliphist store &"
 // disk mount, etc.). Swap this binary if you use a different agent
 // (KDE, GNOME, MATE, LXQt, or lxpolkit).
 spawn-at-startup "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1"
+
+// Quickshell (illogical-impulse / ii config). --no-duplicate makes the launch
+// idempotent: re-running niri config doesn't double-spawn qs.
+spawn-at-startup "qs" "-c" "ii" "--no-duplicate"
+
+// hypridle: managed by `systemctl --user` (hypridle.service) so that
+// reload/restart works correctly and crashes get auto-restarted.
+
+// Desktop wallpaper.
+spawn-at-startup "swaybg" "-i" "/home/shanks/Downloads/desktopbg.jpg" "-m" "fill"

@@ -8,14 +8,6 @@
 // app-id and title of running windows.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Global defaults ─────────────────────────────────────────────────────────
-// Round every window's corners and clip content to match.
-// Works best with prefer-no-csd (set in config.kdl).
-window-rule {
-    geometry-corner-radius 16
-    clip-to-geometry true
-}
-
 // ── Per-app fixes ───────────────────────────────────────────────────────────
 
 // WezTerm: work around initial configure bug (needs an empty default width).
