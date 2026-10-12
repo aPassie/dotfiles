@@ -61,9 +61,9 @@ Item {
             const len = root.len.slice(), want = root.want.slice()
             let settled = true
             for (let i = 0; i < len.length; i++) {
-                if (root.working) { if (Math.random() < 0.03) want[i] = 0.42 + Math.random() * 0.58 }
+                if (root.working) { if (Math.random() < 0.05) want[i] = 0.42 + Math.random() * 0.58 }
                 else want[i] = 1
-                len[i] += (want[i] - len[i]) * 0.09
+                len[i] += (want[i] - len[i]) * 0.15
                 if (Math.abs(len[i] - 1) > 0.01) settled = false
             }
             root.len = len
@@ -79,8 +79,8 @@ Item {
     SequentialAnimation on swell {
         running: root.visible && root.working
         loops: Animation.Infinite
-        NumberAnimation { to: 1.16; duration: 1500; easing.type: Easing.InOutSine }
-        NumberAnimation { to: 0.86; duration: 1500; easing.type: Easing.InOutSine }
+        NumberAnimation { to: 1.16; duration: 950; easing.type: Easing.InOutSine }
+        NumberAnimation { to: 0.86; duration: 950; easing.type: Easing.InOutSine }
     }
     Behavior on swell { enabled: !root.working; NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
     onWorkingChanged: { if (working) settled = false; else swell = 1 }
