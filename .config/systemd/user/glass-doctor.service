@@ -1,0 +1,14 @@
+[Unit]
+Description=Check the glass desktop after package updates and at login
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+# let the session (and a running pacman) settle first
+ExecStartPre=/bin/sleep 20
+ExecStart=%h/.local/bin/glass-doctor
+SuccessExitStatus=1
+Nice=10
+
+[Install]
+WantedBy=graphical-session.target

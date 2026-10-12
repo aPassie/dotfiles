@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep a hidden Dolphin running so the first window after login opens fast
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/dolphin-macos --daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Hot-remove NVIDIA dGPU and put bridge into D3cold
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/disable-nvidia-dgpu.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

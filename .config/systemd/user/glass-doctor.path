@@ -1,0 +1,9 @@
+[Unit]
+Description=Run glass-doctor whenever pacman installs, upgrades or removes a package
+
+[Path]
+PathChanged=/var/lib/pacman/local
+Unit=glass-doctor.service
+
+[Install]
+WantedBy=default.target

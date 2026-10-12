@@ -1,0 +1,2 @@
+# Make RAPL energy readable for the ii battery-power widget (single-user laptop)
+SUBSYSTEM=="powercap", ACTION=="add", RUN+="/bin/chmod -R a+r /sys/devices/virtual/powercap"

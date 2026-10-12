@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/all;
+Actions=glassQuickLook
+X-KDE-Priority=TopLevel
+
+[Desktop Action glassQuickLook]
+Name=Quick Look
+Icon=view-preview
+Exec=/home/shanks/.local/bin/glass-quicklook %f

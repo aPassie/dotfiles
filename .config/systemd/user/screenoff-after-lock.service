@@ -1,0 +1,8 @@
+[Unit]
+Description=Turn off monitors after lock delay
+
+[Service]
+Type=oneshot
+# Only blank if still locked: if hyprlock has already exited (user unlocked),
+# a stale/uncancelled timer becomes a harmless no-op instead of blanking mid-use.
+ExecStart=/usr/bin/bash -c '/usr/bin/pidof hyprlock >/dev/null 2>&1 && /usr/bin/niri msg action power-off-monitors || true'

@@ -1,0 +1,15 @@
+[Unit]
+Description=NVIDIA dGPU - compute (CUDA) mode
+# No [Install]/WantedBy: never auto-started at boot. Default stays OFF.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Refuse to start if the dGPU is already in DISPLAY mode: display is a superset
+# that already provides CUDA, and an in-session display->compute switch would
+# hot-remove the card under a live niri and hang (~8min). The guard has NO '-'
+# prefix, so its refusal aborts the start (no half-switched / dual-active state).
+# Teardown (ExecStop) also self-guards against removing a card niri still holds.
+ExecStartPre=/usr/local/sbin/dgpu-guard-not-display
+ExecStart=/usr/local/sbin/dgpu-enable-compute.sh
+ExecStop=/usr/local/sbin/dgpu-disable.sh

@@ -29,5 +29,10 @@ spawn-at-startup "qs" "-c" "ii" "--no-duplicate"
 // hypridle: managed by `systemctl --user` (hypridle.service) so that
 // reload/restart works correctly and crashes get auto-restarted.
 
+// Display safety net: if a session ever starts with no output enabled at all,
+// turn the built-in panel back on. Cheap insurance against being locked out of
+// the machine with a black screen.
+spawn-at-startup "bash" "-c" "sleep 3; /home/shanks/.local/bin/niri-display-mode guard"
+
 // Desktop wallpaper.
 spawn-at-startup "swaybg" "-i" "/home/shanks/Downloads/desktopbg.jpg" "-m" "fill"

@@ -1,0 +1,80 @@
+#!/bin/bash
+# glass-snapshot — keeps a local history of the desktop's custom files, so anything an update,
+# an installer or a mistake overwrites can be brought back. Local only: it never pushes anywhere.
+#
+#   glass-snapshot [note]            save the current state (does nothing if nothing changed)
+#   glass-snapshot log               list saved states
+#   glass-snapshot changed           what differs from the last saved state
+#   glass-snapshot restore <path> [state]   put a file or folder back (default: last saved state)
+#
+# The history is a bare git repository; its work tree is $HOME but it only ever looks at the
+# paths listed below.
+G="$HOME/.local/share/glass-snapshots.git"
+g() { git --git-dir="$G" --work-tree="$HOME" "$@"; }
+
+PATHS=(
+    .config/quickshell/ii
+    .config/niri
+    .config/hypr
+    .config/illogical-impulse/config.json
+    .config/dolphin-macos/glass.qss
+    .config/dolphin-macos/glass-shim/glass-shim.cpp
+    .config/dolphin-macos/glass-shim/build.sh
+    .config/dolphin-macos/glass-icons
+    .config/dolphin-macos/Kvantum
+    .config/dolphin-macos/kdeglobals
+    .config/dolphin-macos/mimeapps.list
+    .config/dolphinrc
+    .config/kdeglobals
+    .config/gtk-3.0/gtk.css
+    .config/gtk-4.0/gtk.css
+    .config/environment.d
+    .config/systemd/user
+    .config/xremap
+    .config/foot
+    .config/zathura
+    .config/mimeapps.list
+    .config/xdg-desktop-portal
+    .config/chrome-flags.conf
+    .local/share/color-schemes
+    .local/share/kxmlgui5/dolphin
+    .local/share/kio/servicemenus
+    .local/share/dbus-1/services
+    .local/share/applications/org.kde.dolphin.desktop
+    .local/bin/claude-status-hook .local/bin/claude-status-list .local/bin/dolphin-macos
+    .local/bin/glass-quicklook .local/bin/glass-snapshot .local/bin/glass-doctor
+    .local/bin/ii-battery-power .local/bin/niri-display-mode
+    .local/bin/niri-record .local/bin/idle-inhibit-toggle .local/bin/keep-awake-locked
+    .local/bin/ptt
+    .claude/settings.json
+)
+# More paths of your own, one per line relative to $HOME (private things that are not in the
+# public dotfiles repository):
+EXTRA="$HOME/.config/glass-snapshot-extra.txt"
+[ -r "$EXTRA" ] && while IFS= read -r line; do [ -n "$line" ] && [ "${line#\#}" = "$line" ] && PATHS+=("$line"); done < "$EXTRA"
+
+if [ ! -d "$G" ]; then
+    git init -q --bare "$G" || exit 1
+    g config status.showUntrackedFiles no
+    g config core.excludesFile /dev/null
+    g config user.name "$(git config --global user.name || echo "$USER")"
+    g config user.email "$(git config --global user.email || echo "$USER@localhost")"
+    printf '%s\n' '*.so.new' '*.qsb.tmp' > "$G/info/exclude"
+fi
+
+existing() { for p in "${PATHS[@]}"; do [ -e "$HOME/$p" ] && printf '%s\n' "$p"; done; }
+
+case "${1:-save}" in
+    log) g log --format='%h  %ad  %s' --date=format:'%Y-%m-%d %H:%M' ;;
+    changed) cd "$HOME" && mapfile -t P < <(existing) && g add -A -n -- "${P[@]}" 2>/dev/null; g status --short ;;
+    restore)
+        [ -n "$2" ] || { echo "usage: glass-snapshot restore <path> [state]"; exit 2; }
+        p=$(realpath -m --relative-to="$HOME" "$2")
+        cd "$HOME" && g checkout "${3:-HEAD}" -- "$p" && echo "restored $p from ${3:-the last saved state}" ;;
+    *)
+        note="${*:-snapshot}"; [ "$1" = save ] && note="${*:2}"; [ -n "$note" ] || note=snapshot
+        cd "$HOME" && mapfile -t P < <(existing)
+        g add -A -- "${P[@]}" 2>/dev/null
+        if g diff --cached --quiet; then echo "nothing changed since the last snapshot"; exit 0; fi
+        g commit -q -m "$note" && echo "saved: $(g log -1 --format='%h %s')" ;;
+esac

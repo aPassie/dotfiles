@@ -1,0 +1,7 @@
+[Unit]
+Description=Turn off monitors 1 minute after lock
+
+[Timer]
+OnActiveSec=60s
+AccuracySec=1s
+RemainAfterElapse=no

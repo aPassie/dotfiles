@@ -83,7 +83,7 @@ gestures {
 
 // ── Cursor theme ────────────────────────────────────────────────────────────
 cursor {
-    xcursor-theme "Bibata-Modern-Classic"
+    xcursor-theme "Bibata-Modern-Classic-NoCross"  // user theme: crosshair → arrow (niri screenshot UI)
     xcursor-size 24
     hide-when-typing
 }

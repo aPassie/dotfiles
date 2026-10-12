@@ -1,0 +1,64 @@
+/* Controls for Dolphin's toolbar: round buttons and a pill location bar, fill only (a slightly
+   lighter shape on the black window, no rim or outline anywhere). Loaded by
+   ~/.local/bin/dolphin-macos (-stylesheet). Colours and everything else come from the Kvantum
+   theme "GlassSolid"; the breadcrumb and the icons come from glass-shim. */
+QToolBar#mainToolBar {
+    spacing: 0px;
+    padding: 9px 9px;
+    border: none;
+}
+QToolBar#mainToolBar QToolButton {
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0px;
+    margin: 0px 5px;
+    border-radius: 14px;
+    background-color: rgba(255, 255, 255, 23);
+    border: none;
+}
+QToolBar#mainToolBar QToolButton:hover { background-color: rgba(255, 255, 255, 38); }
+QToolBar#mainToolBar QToolButton:pressed,
+QToolBar#mainToolBar QToolButton:checked { background-color: rgba(255, 255, 255, 56); }
+/* no drop-down arrow on the view button (an empty image; "none" falls back to the theme's arrow) */
+QToolBar#mainToolBar QToolButton::menu-indicator,
+QToolBar#mainToolBar QToolButton::menu-arrow { image: url(/home/shanks/.config/dolphin-macos/glass-icons/empty.png); width: 1px; height: 1px; }
+QToolBar#mainToolBar QToolButton::menu-button { image: url(/home/shanks/.config/dolphin-macos/glass-icons/empty.png); width: 1px; border: none; }
+/* The location bar cannot be styled itself (it paints through a style call Kvantum ignores), so
+   the pill is drawn on the plain container Dolphin wraps it in. */
+QToolBar#mainToolBar QSplitter > .QWidget {
+    min-height: 28px;
+    max-height: 28px;
+    margin: 0px 5px;
+    border-radius: 14px;
+    background-color: rgba(255, 255, 255, 23);
+    border: none;
+}
+/* Dolphin's padding widget inside the pill (glass-shim pins its width) */
+QToolBar#mainToolBar QSplitter > .QWidget > .QWidget {
+    border: none;
+    background: transparent;
+}
+/* "Empty Trash" and similar buttons Dolphin puts at the end of the pill: no box of their own */
+QToolBar#mainToolBar QSplitter > .QWidget > QAbstractButton {
+    border: none;
+    background: transparent;
+    margin-right: 10px;
+}
+/* Sidebar: Dolphin tints the Places panel itself; keep it the same pitch black as the window. */
+KFilePlacesView, KFilePlacesView > QWidget { background-color: #000000; }
+/* Tabs: same fill-only shapes as the toolbar; the open tab is the lighter one */
+QTabBar { background: transparent; border: none; qproperty-drawBase: 0; }
+QTabBar::tab {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    padding: 4px 10px;
+    margin: 3px 3px 5px 3px;
+    color: rgba(255, 255, 255, 170);
+}
+QTabBar::tab:hover { background-color: rgba(255, 255, 255, 14); }
+QTabBar::tab:selected { background-color: rgba(255, 255, 255, 23); color: #ffffff; }
+/* Status bar chip (folder and file count) */
+DolphinStatusBar { background-color: rgba(255, 255, 255, 23); border: none; border-radius: 10px; }

@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Top battery consumers by *estimated* power.
+
+There is no per-process power API on Linux. This reads the real RAPL package
+energy counter (CPU + iGPU + uncore) over a 1s window to get total package
+watts, then apportions that to processes by their share of total CPU time in
+the same window -- the same model scaphandre/powerjoular use. Output is genuine
+watts, not CPU%.
+
+RAPL's energy_uj is root-only by default (PLATYPUS mitigation); this script
+assumes a udev rule has made /sys/.../powercap world-readable, so it needs no
+root at runtime. dGPU (NVIDIA) power is not included -- it's powered off on this
+machine and the active iGPU is already inside the package RAPL number.
+"""
+import glob
+import json
+import time
+
+RAPL = "/sys/class/powercap/intel-rapl:0"
+INTERVAL = 1.0
+
+
+def read_int(path):
+    with open(path) as f:
+        return int(f.read())
+
+
+def total_cpu_jiffies():
+    # First line of /proc/stat ("cpu ...") summed = total capacity across all cores.
+    with open("/proc/stat") as f:
+        return sum(int(x) for x in f.readline().split()[1:])
+
+
+def proc_jiffies():
+    out = {}
+    for stat in glob.glob("/proc/[0-9]*/stat"):
+        try:
+            with open(stat) as f:
+                data = f.read()
+            # comm may contain spaces/parens -> bracketed by the last ')'.
+            rp = data.rfind(")")
+            comm = data[data.find("(") + 1:rp]
+            fields = data[rp + 2:].split()
+            if int(fields[6]) & 0x00200000:  # PF_KTHREAD -> skip kernel threads (kworker, etc.)
+                continue
+            out[comm] = out.get(comm, 0) + int(fields[11]) + int(fields[12])  # utime+stime
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
+try:
+    e0 = read_int(f"{RAPL}/energy_uj")
+except OSError:
+    # RAPL not readable yet (udev rule not installed) -> graceful empty result.
+    print(json.dumps({"error": "rapl-unreadable", "package": 0, "top": []}))
+    raise SystemExit(0)
+
+t0, p0 = total_cpu_jiffies(), proc_jiffies()
+time.sleep(INTERVAL)
+e1, t1, p1 = read_int(f"{RAPL}/energy_uj"), total_cpu_jiffies(), proc_jiffies()
+
+de = e1 - e0
+if de < 0:  # 32/64-bit counter wraparound
+    try:
+        de += read_int(f"{RAPL}/max_energy_range_uj")
+    except OSError:
+        de = 0
+pkg_watts = (de / 1e6) / INTERVAL
+
+dt = t1 - t0
+rows = []
+if dt > 0:
+    for comm, j1 in p1.items():
+        dj = j1 - p0.get(comm, 0)
+        if dj > 0:
+            rows.append((comm, pkg_watts * dj / dt))
+rows.sort(key=lambda r: r[1], reverse=True)
+
+print(json.dumps({
+    "package": round(pkg_watts, 2),
+    "top": [{"name": c, "watts": round(w, 2)} for c, w in rows[:5]],
+}))

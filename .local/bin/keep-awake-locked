@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Toggle a system-suspend inhibitor so background work (e.g. Claude Code) keeps
+# running while the device is LOCKED.
+#
+# Unlike idle-inhibit-toggle, this only blocks `sleep` (suspend), NOT `idle`, so:
+#   - hypridle still locks the session at its 5-min idle timeout
+#   - the screen still powers off after lock (screenoff-after-lock.timer)
+#   - the 10-min `systemctl suspend` is blocked -> CPU keeps running -> Claude
+#     Code background tasks continue, with the machine securely locked.
+LOCK="/tmp/keep-awake-locked-${UID}.pid"
+
+if [[ -f "$LOCK" ]] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then
+    kill "$(cat "$LOCK")" && rm -f "$LOCK"
+    notify-send -i system-suspend "Keep awake while locked" "Off — suspend re-enabled"
+else
+    systemd-inhibit --what=sleep --who="keep-awake-locked" \
+        --why="background work while locked" --mode=block \
+        sleep infinity &
+    echo $! > "$LOCK"
+    notify-send -i system-run "Keep awake while locked" "On — won't suspend while locked"
+fi

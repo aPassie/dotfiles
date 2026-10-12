@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Smart Mod+F for niri:
+#  - If floating: true fullscreen (hides other windows; toggle off restores).
+#  - If tiled: maximize-column (fills column, bar still visible).
+set -e
+floating=$(niri msg --json focused-window | jq -r '.is_floating // false')
+if [ "$floating" = "true" ]; then
+  niri msg action fullscreen-window
+else
+  niri msg action maximize-column
+fi

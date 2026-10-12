@@ -1,0 +1,52 @@
+#!/bin/bash
+# Crash-free screen recording for niri via wf-recorder.
+# (The Quickshell recorder uses the regionSelector overlay, which segfaults on
+#  Qt 6.11 — QWaylandWindow::calculateScreenFromSurfaceEvents null-deref.)
+#
+# Usage:
+#   niri-record screen          record the focused output (video only)
+#   niri-record region          drag-select a region (slurp), record it
+#   niri-record screen sound    also capture desktop audio (default sink monitor)
+#   niri-record region sound
+#
+# Run again (any mode) while recording to STOP and finalize the file.
+#
+# Encoding: hardware H.264 via VAAPI on the AMD 780M (low CPU/battery).
+# If a recording ever comes out broken/empty, drop to software encoding by
+# removing the CODEC=(...) line below (wf-recorder then defaults to x264).
+set -u
+
+dir="$HOME/Videos/Recordings"
+mkdir -p "$dir"
+
+# Already recording? -> stop and finalize.
+if pgrep -x wf-recorder >/dev/null; then
+    pkill -INT -x wf-recorder
+    notify-send -i media-record "Screen recording" "Stopped — saved to ~/Videos/Recordings" 2>/dev/null || true
+    exit 0
+fi
+
+mode="${1:-screen}"
+sound="${2:-}"
+file="$dir/$(date +%Y-%m-%d_%H-%M-%S).mp4"
+
+CODEC=(--codec h264_vaapi --device /dev/dri/renderD128)
+
+AUDIO=()
+if [ "$sound" = "sound" ]; then
+    sink="$(pactl get-default-sink 2>/dev/null)"
+    [ -n "$sink" ] && AUDIO=(--audio="${sink}.monitor") || AUDIO=(--audio)
+fi
+
+case "$mode" in
+    region)
+        geom="$(slurp)" || exit 1
+        notify-send -i media-record "Screen recording" "Recording region — press the stop key to finish" 2>/dev/null || true
+        exec wf-recorder "${CODEC[@]}" "${AUDIO[@]}" -g "$geom" -f "$file"
+        ;;
+    *)
+        out="$(niri msg --json focused-output 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)"
+        notify-send -i media-record "Screen recording" "Recording ${out:-screen} — press the stop key to finish" 2>/dev/null || true
+        exec wf-recorder "${CODEC[@]}" "${AUDIO[@]}" ${out:+-o "$out"} -f "$file"
+        ;;
+esac

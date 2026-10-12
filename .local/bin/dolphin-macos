@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Launch Dolphin with an isolated, macOS (WhiteSur-dark) theme.
+# Keeps illogical-impulse's global Material You theming untouched everywhere else.
+export XDG_CONFIG_HOME="$HOME/.config/dolphin-macos"
+export QT_QPA_PLATFORMTHEME=kde
+export QT_STYLE_OVERRIDE=kvantum
+# glass-shim.so: removes the padding Dolphin puts in front of the path, so it starts at the pill's edge
+SHIM="$HOME/.config/dolphin-macos/glass-shim/glass-shim.so"
+[ -r "$SHIM" ] && export LD_PRELOAD="$SHIM"
+# glass.qss: round toolbar buttons and the pill behind the location bar (Kvantum cannot draw these)
+exec /usr/bin/dolphin -stylesheet "$HOME/.config/dolphin-macos/glass.qss" "$@"

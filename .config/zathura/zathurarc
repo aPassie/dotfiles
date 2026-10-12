@@ -1,0 +1,40 @@
+# Dark, minimal look to match the glass shell.
+set font "Outfit 11"
+set guioptions ""
+set selection-clipboard clipboard
+set adjust-open "width"
+set scroll-step 80
+set statusbar-h-padding 12
+set statusbar-v-padding 6
+
+set default-bg "rgba(20,17,12,1)"
+set default-fg "rgba(255,255,255,1)"
+set statusbar-bg "rgba(28,23,15,1)"
+set statusbar-fg "rgba(255,255,255,0.85)"
+set inputbar-bg "rgba(28,23,15,1)"
+set inputbar-fg "rgba(255,255,255,1)"
+set notification-bg "rgba(28,23,15,1)"
+set notification-fg "rgba(255,255,255,1)"
+set notification-error-bg "rgba(255,69,58,1)"
+set notification-error-fg "rgba(255,255,255,1)"
+set completion-bg "rgba(28,23,15,1)"
+set completion-fg "rgba(255,255,255,0.8)"
+set completion-highlight-bg "rgba(255,255,255,0.18)"
+set completion-highlight-fg "rgba(255,255,255,1)"
+set highlight-color "rgba(255,178,36,0.45)"
+set highlight-active-color "rgba(48,209,88,0.55)"
+set index-bg "rgba(20,17,12,1)"
+set index-fg "rgba(255,255,255,0.85)"
+set index-active-bg "rgba(255,255,255,0.18)"
+set index-active-fg "rgba(255,255,255,1)"
+
+# Pages keep their own colours. Press Ctrl+r to switch to dark pages (white text on dark).
+set recolor false
+set recolor-lightcolor "rgba(20,17,12,1)"
+set recolor-darkcolor "rgba(235,235,235,1)"
+set recolor-keephue true
+
+# Ctrl + / Ctrl - to zoom, like a browser
+map <C-=> zoom in
+map <C--> zoom out
+map <C-0> adjust_window width

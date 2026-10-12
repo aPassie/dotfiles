@@ -1,0 +1,5 @@
+# "Show in folder" requests (from browsers, download managers, ...) go to the themed Dolphin.
+# Without this, the system picks Nautilus whenever Dolphin is not already running.
+[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=/home/shanks/.local/bin/dolphin-macos --daemon

@@ -15,12 +15,12 @@ binds {
     Mod+Q      hotkey-overlay-title="Close Window"          { close-window; }
 
     // ── Shell panels ────────────────────────────────────────────────────────
-    Mod+space hotkey-overlay-title="App launcher (fuzzel)"  { spawn "fuzzel"; }
-    Mod+P     hotkey-overlay-title="Control center"         { spawn "qs" "-c" "ii" "ipc" "call" "sidebarRight" "toggle"; }
-    Mod+N     hotkey-overlay-title="Notifications"          { spawn "qs" "-c" "ii" "ipc" "call" "sidebarRight" "toggle"; }
+    Mod+space hotkey-overlay-title="App launcher"           { spawn "qs" "-c" "ii" "ipc" "call" "launcher" "toggle"; }
+    Mod+P     hotkey-overlay-title="Control center"         { spawn "qs" "-c" "ii" "ipc" "call" "glassPanels" "toggle" "control"; }
+    Mod+N     hotkey-overlay-title="Notifications"          { spawn "qs" "-c" "ii" "ipc" "call" "glassPanels" "toggle" "notifications"; }
     Mod+I     hotkey-overlay-title="Idle inhibitor"         { spawn "idle-inhibit-toggle"; }
-    Mod+Y     hotkey-overlay-title="Clipboard"              { spawn "sh" "-c" "cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"; }
-    Mod+Slash hotkey-overlay-title="Cheatsheet"             { spawn "qs" "-c" "ii" "ipc" "call" "cheatsheet" "toggle"; }
+    Mod+Shift+I hotkey-overlay-title="Keep awake while locked" { spawn "keep-awake-locked"; }
+    Mod+Y     hotkey-overlay-title="Clipboard"              { spawn "qs" "-c" "ii" "ipc" "call" "launcher" "clipboard"; }
     Mod+M     hotkey-overlay-title="Media controls"         { spawn "qs" "-c" "ii" "ipc" "call" "mediaControls" "toggle"; }
     Mod+Tab   hotkey-overlay-title="Overview"               { toggle-overview; }
     Mod+L     hotkey-overlay-title="Lock screen"            { spawn "sh" "-c" "pidof hyprlock || hyprlock"; }
@@ -52,6 +52,7 @@ binds {
     // ── Screen recording (wf-recorder, VAAPI) — toggle on/off ─────────────────
     Mod+Alt+R       hotkey-overlay-title="Record screen (toggle)"  { spawn "/home/shanks/.local/bin/niri-record" "screen"; }
     Mod+Alt+Shift+R hotkey-overlay-title="Record region (toggle)"  { spawn "/home/shanks/.local/bin/niri-record" "region"; }
+
 
     // ── Focus ───────────────────────────────────────────────────────────────
     Mod+Left  { focus-column-or-monitor-left; }

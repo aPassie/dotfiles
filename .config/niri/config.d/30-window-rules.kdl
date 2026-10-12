@@ -53,3 +53,28 @@ window-rule {
 //     match app-id=r#"^org\.gnome\.Calculator$"#
 //     open-floating true
 // }
+
+// ── Glass media panel (ii shell) ────────────────────────────────────────────
+// The now-playing panel asks niri to blur what is behind it. xray false makes
+// that the windows behind it, not just the wallpaper.
+layer-rule {
+    match namespace="^quickshell:(mediaControls|glass|popup)$"
+    background-effect {
+        xray false
+    }
+}
+
+// Blur strength for all background blur. Kept light: one pass, small offset.
+blur {
+    passes 1
+    offset 2
+}
+
+// ── Dolphin ─────────────────────────────────────────────────────────────────
+// Solid pitch-black window (Kvantum theme "GlassSolid") with square corners. No blur: nothing
+// shows through it.
+window-rule {
+    match app-id="^org\\.kde\\.dolphin$"
+    geometry-corner-radius 0
+    clip-to-geometry true
+}

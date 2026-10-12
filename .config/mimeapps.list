@@ -15,6 +15,9 @@ video/mp4=vlc.desktop
 x-scheme-handler/antigravity=antigravity.desktop
 x-scheme-handler/claude-cli=claude-code-url-handler.desktop
 inode/directory=org.kde.dolphin.desktop
+x-scheme-handler/claude=com.anthropic.Claude.desktop
+application/pdf=org.pwmt.zathura.desktop
+application/epub+zip=org.pwmt.zathura.desktop
 
 [Added Associations]
 text/markdown=com.brave.Origin.beta.desktop;

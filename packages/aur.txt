@@ -1,0 +1,10 @@
+quickshell-git
+darkly-bin
+whitesur-icon-theme
+bibata-cursor-theme
+otf-space-grotesk
+ttf-readex-pro
+ttf-rubik-vf
+ttf-roboto-flex
+ttf-material-symbols-variable-git
+xremap-niri-bin

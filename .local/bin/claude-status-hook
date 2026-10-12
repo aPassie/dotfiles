@@ -1,0 +1,74 @@
+#!/bin/bash
+# Claude Code hook -> one status file per session for the bar's Claude island.
+# Wired to SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Notification, Stop and
+# SessionEnd in ~/.claude/settings.json. It must print nothing and never fail: whatever a
+# hook prints can end up in the conversation, and a failing hook can block a tool.
+exec 2>/dev/null
+D="${XDG_STATE_HOME:-$HOME/.local/state}/claude-status"
+mkdir -p "$D" || exit 0
+IN=$(cat)
+eval "$(jq -r '@sh "EV=\(.hook_event_name // "") SID=\(.session_id // "") CWD=\(.cwd // "") NT=\(.notification_type // "") MSG=\(.message // "") TOOL=\(.tool_name // "") CMD=\(.tool_input.command // "") FP=\(.tool_input.file_path // "")"' <<<"$IN")" || exit 0
+[ -n "$SID" ] || exit 0
+case "$SID" in *[!A-Za-z0-9_-]*) exit 0;; esac
+F="$D/$SID.json"
+poke() { (timeout 3 qs -c ii ipc call claudeStatus refresh >/dev/null 2>&1 &) ; }
+
+if [ "$EV" = SessionEnd ]; then rm -f "$F"; poke; exit 0; fi
+
+OLD=idle; SINCE=0; TURN=0; WIN=0; PID=0; DETAIL=""; HOME_CWD=""
+[ -r "$F" ] && eval "$(jq -r '@sh "OLD=\(.state // "idle") SINCE=\(.since // 0) TURN=\(.turn // 0) WIN=\(.win // 0) PID=\(.pid // 0) DETAIL=\(.detail // "") HOME_CWD=\(.cwd // "")"' "$F")"
+# The folder shown is the one the session started in; Claude changes directory while it works.
+[ -n "$HOME_CWD" ] && CWD=$HOME_CWD
+NOW=$(date +%s)
+NEW=$OLD
+case "$EV" in
+    SessionStart) NEW=idle; DETAIL="" ;;
+    UserPromptSubmit) NEW=working; TURN=$NOW; DETAIL="" ;;
+    PreToolUse)
+        if [ "$TOOL" = AskUserQuestion ]; then NEW=asking; DETAIL="Has a question for you"
+        else
+            NEW=working
+            one=$(printf '%s' "$CMD" | tr '\n\t' '  ' | cut -c1-90)
+            if [ -n "$one" ]; then DETAIL="Wants to run: $one"
+            elif [ -n "$FP" ]; then DETAIL="Wants to change: ${FP##*/}"
+            else DETAIL="Wants to use $TOOL"; fi
+        fi ;;
+    PostToolUse) NEW=working ;;
+    Notification)
+        case "$NT" in
+            permission_prompt|elicitation_dialog) NEW=asking ;;
+            "") case "$MSG" in *permission*|*"needs your"*) NEW=asking ;; *) exit 0 ;; esac ;;
+            *) exit 0 ;;
+        esac
+        [ -n "$DETAIL" ] || DETAIL=$(printf '%s' "$MSG" | tr '\n\t' '  ' | cut -c1-100) ;;
+    Stop)
+        NEW=done
+        if [ "$TURN" -gt 0 ]; then
+            s=$((NOW - TURN))
+            if [ $s -ge 60 ]; then DETAIL="Finished after $((s / 60)) min $((s % 60)) s"; else DETAIL="Finished after $s s"; fi
+        else DETAIL="Finished"; fi ;;
+    *) exit 0 ;;
+esac
+
+# The terminal this session lives in: the window that has focus when a prompt is sent.
+if [ "$EV" = UserPromptSubmit ] || { [ "$EV" = SessionStart ] && [ "$WIN" = 0 ]; }; then
+    w=$(timeout 2 niri msg -j focused-window | jq -r '.id // 0'); [ -n "$w" ] && WIN=$w
+fi
+# Claude's own process, so a session that died without saying goodbye can be cleared.
+if [ "$PID" = 0 ]; then
+    p=$PPID
+    for _ in 1 2 3 4 5; do
+        [ "$p" -gt 1 ] || break
+        case "$(ps -o comm= -p "$p")" in claude|node) PID=$p; break ;; esac
+        p=$(ps -o ppid= -p "$p" | tr -d ' ')
+    done
+fi
+[ "$NEW" = "$OLD" ] || SINCE=$NOW
+[ "$SINCE" -gt 0 ] || SINCE=$NOW
+
+DIR=${CWD##*/}; [ "${CWD%/}" = "$HOME" ] && DIR="~"
+jq -n --arg session "$SID" --arg cwd "$CWD" --arg dir "$DIR" --arg state "$NEW" --arg detail "$DETAIL" \
+    --argjson since "$SINCE" --argjson turn "$TURN" --argjson win "${WIN:-0}" --argjson pid "${PID:-0}" \
+    '{session: $session, cwd: $cwd, dir: $dir, state: $state, detail: $detail, since: $since, turn: $turn, win: $win, pid: $pid}' > "$F.tmp" && mv "$F.tmp" "$F"
+[ "$NEW" = "$OLD" ] && [ "$EV" != SessionStart ] || poke
+exit 0

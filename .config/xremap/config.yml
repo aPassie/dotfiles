@@ -1,3 +1,15 @@
+modmap:
+  # Push-to-talk dictation (pttd.service): hold Right Ctrl to dictate.
+  # The key never reaches niri.
+  - name: push-to-talk
+    remap:
+      KEY_RIGHTCTRL:
+        skip_key_event: true
+        press:
+          launch: ["/home/shanks/.local/bin/ptt", "down"]
+        release:
+          launch: ["/home/shanks/.local/bin/ptt", "up"]
+
 keymap:
   - name: nautilus-backspace-up
     application:

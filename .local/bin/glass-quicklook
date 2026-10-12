@@ -1,0 +1,5 @@
+#!/bin/sh
+# Hand a file to the shell's Quick Look. Dolphin runs with its own config folder
+# (XDG_CONFIG_HOME=~/.config/dolphin-macos), where `qs -c ii` cannot find the shell,
+# so point at the shell by path instead.
+exec qs -p "$HOME/.config/quickshell/ii" ipc call quicklook open "$1"

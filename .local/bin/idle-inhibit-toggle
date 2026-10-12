@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+LOCK="/tmp/idle-inhibit-${UID}.pid"
+if [[ -f "$LOCK" ]] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then
+    kill "$(cat "$LOCK")" && rm -f "$LOCK"
+    notify-send "Idle inhibitor" "Off"
+else
+    systemd-inhibit --what=idle:sleep --who=user --why=manual --mode=block sleep infinity &
+    echo $! > "$LOCK"
+    notify-send "Idle inhibitor" "On"
+fi

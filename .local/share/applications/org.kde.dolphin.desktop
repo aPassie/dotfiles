@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Dolphin
+GenericName=File Manager
+Comment=Manage your files
+Exec=dolphin-macos %u
+Icon=org.kde.dolphin
+Type=Application
+Categories=Qt;KDE;System;FileTools;FileManager;
+MimeType=inode/directory;
+InitialPreference=10
+Keywords=files;file management;file browsing;samba;network shares;Explorer;Finder;
+StartupWMClass=dolphin
+X-DocPath=dolphin/index.html

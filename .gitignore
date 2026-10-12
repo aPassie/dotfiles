@@ -1,0 +1,6 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# local list of private things the sync script strips
+/tools/private.local
+/.claude/

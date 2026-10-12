@@ -1,0 +1,12 @@
+[Unit]
+Description=Pin PPD to power-saver and disable CPU boost
+After=power-profiles-daemon.service
+Requires=power-profiles-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/disable-cpu-boost.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical.target

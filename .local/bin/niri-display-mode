@@ -1,0 +1,396 @@
+#!/usr/bin/bash
+# Display mode / arrangement manager for niri.
+#
+# niri has no built-in "only display 1 / only display 2 / duplicate" UI, and
+# `niri msg output ...` changes are TEMPORARY (forgotten on the next config
+# reload). So this writes the arrangement into a generated KDL fragment that
+# config.kdl includes, validates it, and reloads — one code path, persistent.
+#
+# Mirroring is deliberately absent: niri cannot mirror outputs at all. That
+# would need wl-mirror as a separate fullscreen client.
+#
+# Usage:
+#   niri-display-mode status                    -> JSON state
+#   niri-display-mode set <extend|internal|external> [arrangement]
+#   niri-display-mode arrange <right|left|above|below>
+#
+# Only the internal panel (eDP-*) and the first external output are managed;
+# any further outputs are left to niri's automatic placement.
+
+set -uo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/niri"
+MON_KDL="$CONFIG_DIR/config.d/95-monitors.kdl"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_FILE="$STATE_DIR/niri-display-mode"
+DGPU_UNIT="dgpu-display.service"
+DGPU_PCI="0000:01:00.0"
+
+ROLLBACK_FAILED=0
+
+INTERNAL_SCALE="1.25"
+EXTERNAL_SCALE="1.0"
+
+# Resolve once: PATH here has six directories ahead of /usr/bin, so a bare
+# `niri`/`jq` costs a failed execve per miss on every poll.
+NIRI="$(command -v niri || echo niri)"
+JQ="$(command -v jq || echo jq)"
+
+die() { echo "niri-display-mode: $*" >&2; exit 1; }
+
+outputs_json() { "$NIRI" msg --json outputs 2>/dev/null; }
+
+# --- output discovery -------------------------------------------------------
+
+# Internal panel: eDP-*. External: first non-eDP output niri currently reports.
+#
+# Kept to a single niri call + a single jq call: `status` is polled by the
+# sidebar, so every avoidable subprocess here is battery burned all day.
+detect_outputs() {
+    local j pair
+    j="$(outputs_json)" || j=""
+    [ -z "$j" ] && j='{}'
+    OUTPUTS_JSON="$j"
+    pair="$("$JQ" -r '
+        (keys) as $n
+        | (($n | map(select(startswith("eDP")))       | first) // "eDP-1")
+        + "\t"
+        + (($n | map(select(startswith("eDP") | not)) | first) // "")
+    ' <<<"$j" 2>/dev/null)"
+    INTERNAL="${pair%%$'\t'*}"
+    EXTERNAL="${pair#*$'\t'}"
+    [ -z "$INTERNAL" ] && INTERNAL="eDP-1"
+}
+
+output_on() { "$JQ" -e --arg n "$1" '.[$n].logical != null' <<<"$OUTPUTS_JSON" >/dev/null 2>&1; }
+
+# Filesystem test rather than `systemctl list-unit-files` — same answer, no
+# subprocess, and this is on the polled path.
+dgpu_unit_exists() {
+    [ -f "/etc/systemd/system/$DGPU_UNIT" ] \
+        || [ -f "/usr/lib/systemd/system/$DGPU_UNIT" ] \
+        || [ -f "$HOME/.config/systemd/user/$DGPU_UNIT" ]
+}
+
+# Current dGPU mode: off | compute | display | present. Same semantics as
+# /usr/local/sbin/dgpu-status, but as pure file tests so the polled status path
+# stays free of subprocesses.
+dgpu_mode() {
+    [ -e "/sys/bus/pci/devices/$DGPU_PCI" ] || { echo off; return; }
+    [ -d /sys/module/nvidia_drm ] && { echo display; return; }
+    [ -d /sys/module/nvidia ]     && { echo compute; return; }
+    echo present
+}
+
+# Logical (scaled) size of an output's current mode. Echoes "W H".
+logical_size() {
+    local name="$1" scale="$2" px
+    px="$("$JQ" -r --arg n "$name" '
+        .[$n] as $o
+        | ($o.current_mode // 0) as $i
+        | ($o.modes[$i] // $o.modes[0]) as $m
+        | if $m then "\($m.width) \($m.height)" else empty end
+    ' <<<"$OUTPUTS_JSON" 2>/dev/null)"
+    [ -z "$px" ] && { echo "0 0"; return; }
+    awk -v s="$scale" '{ printf "%d %d", int($1/s + 0.5), int($2/s + 0.5) }' <<<"$px"
+}
+
+# --- arrangement geometry ---------------------------------------------------
+#
+# Cross-axis centered: side-by-side layouts align the two panels' vertical
+# centers, stacked layouts align horizontal centers. Sets IX IY EX EY.
+compute_positions() {
+    local arrangement="$1"
+    read -r iw ih <<<"$(logical_size "$INTERNAL" "$INTERNAL_SCALE")"
+    read -r ew eh <<<"$(logical_size "$EXTERNAL" "$EXTERNAL_SCALE")"
+    # Fall back to something sane if a mode could not be read.
+    [ "$iw" -le 0 ] && { iw=1920; ih=1080; }
+    [ "$ew" -le 0 ] && { ew=1920; eh=1080; }
+
+    local dy=$(( (ih - eh) / 2 )) dx=$(( (iw - ew) / 2 ))
+    case "$arrangement" in
+        right)
+            IX=0; IY=$(( dy < 0 ? -dy : 0 ))
+            EX=$iw; EY=$(( dy > 0 ? dy : 0 )) ;;
+        left)
+            EX=0; EY=$(( dy > 0 ? dy : 0 ))
+            IX=$ew; IY=$(( dy < 0 ? -dy : 0 )) ;;
+        above)
+            EX=$(( dx > 0 ? dx : 0 )); EY=0
+            IX=$(( dx < 0 ? -dx : 0 )); IY=$eh ;;
+        below)
+            IX=$(( dx < 0 ? -dx : 0 )); IY=0
+            EX=$(( dx > 0 ? dx : 0 )); EY=$ih ;;
+        *) die "unknown arrangement: $arrangement" ;;
+    esac
+}
+
+# --- config generation ------------------------------------------------------
+
+write_kdl() {
+    local mode="$1" arrangement="$2" tmp
+    tmp="$(mktemp)"
+    {
+        echo "// Generated by niri-display-mode — do not edit by hand."
+        echo "// mode=$mode arrangement=$arrangement"
+        echo
+        case "$mode" in
+            internal)
+                printf 'output "%s" {\n    scale %s\n    position x=0 y=0\n}\n' \
+                    "$INTERNAL" "$INTERNAL_SCALE"
+                if [ -n "$EXTERNAL" ]; then
+                    printf '\noutput "%s" {\n    off\n}\n' "$EXTERNAL"
+                fi
+                ;;
+            external)
+                # SAFETY: external-only is NEVER persisted. If it were, a boot or
+                # resume with the dGPU asleep (HDMI absent) would leave niri with
+                # the panel off and no external output — zero displays, no way in.
+                # So the file describes the extend layout, and the panel is
+                # blanked live afterwards via a temporary `niri msg output off`,
+                # which niri forgets on reload/restart. Worst case you boot into
+                # extend, which is always usable.
+                compute_positions "$arrangement"
+                printf 'output "%s" {\n    scale %s\n    position x=%d y=%d\n}\n' \
+                    "$INTERNAL" "$INTERNAL_SCALE" "$IX" "$IY"
+                printf '\noutput "%s" {\n    scale %s\n    position x=%d y=%d\n}\n' \
+                    "$EXTERNAL" "$EXTERNAL_SCALE" "$EX" "$EY"
+                ;;
+            extend)
+                compute_positions "$arrangement"
+                printf 'output "%s" {\n    scale %s\n    position x=%d y=%d\n}\n' \
+                    "$INTERNAL" "$INTERNAL_SCALE" "$IX" "$IY"
+                printf '\noutput "%s" {\n    scale %s\n    position x=%d y=%d\n}\n' \
+                    "$EXTERNAL" "$EXTERNAL_SCALE" "$EX" "$EY"
+                ;;
+            *) rm -f "$tmp"; die "unknown mode: $mode" ;;
+        esac
+    } >"$tmp"
+
+    # Hard invariant: a persisted config that disables the built-in panel can
+    # lock you out of the machine entirely (the external output may not exist at
+    # boot). Refuse to write one, whatever the caller asked for.
+    if awk -v n="$INTERNAL" '
+        $0 ~ "^output \"" n "\"" { inblock = 1; next }
+        inblock && /^}/ { inblock = 0 }
+        inblock && $1 == "off" { found = 1 }
+        END { exit !found }
+    ' "$tmp"; then
+        rm -f "$tmp"
+        die "refusing to persist a config that turns off $INTERNAL"
+    fi
+
+    local backup=""
+    if [ -f "$MON_KDL" ]; then
+        backup="$(mktemp)"
+        cp "$MON_KDL" "$backup"
+    fi
+    mkdir -p "$(dirname "$MON_KDL")"
+    mv "$tmp" "$MON_KDL"
+
+    if ! "$NIRI" validate >/dev/null 2>&1; then
+        if [ -n "$backup" ]; then cp "$backup" "$MON_KDL"; rm -f "$backup"
+        else rm -f "$MON_KDL"; fi
+        die "generated config failed 'niri validate' — reverted"
+    fi
+    [ -n "$backup" ] && rm -f "$backup"
+
+    "$NIRI" msg action load-config-file >/dev/null 2>&1 \
+        || die "config reload failed"
+}
+
+# Physical link state of the dGPU HDMI connector, independent of whether niri
+# has adopted it. "connected" / "disconnected", or "" if the card is absent.
+# Lets a failure say WHY instead of blaming the service for an unplugged cable.
+hdmi_link_status() {
+    local f
+    for f in /sys/class/drm/card*-HDMI-A-*/status; do
+        [ -r "$f" ] || continue
+        cat "$f" 2>/dev/null
+        return 0
+    done
+    echo ""
+}
+
+# Bring the external output into existence if the dGPU display service owns it.
+#
+# Starting that service powers the dGPU rail: measured ~+18W (10W -> 28W) on
+# this machine, and it does NOT runtime-suspend once niri has opened the card.
+# So a failed attempt must never LEAVE it powered — that is a silent battery
+# leak the user cannot see. We remember whether we were the ones who started it
+# and roll back if no monitor turned up.
+ensure_external_live() {
+    [ -n "$EXTERNAL" ] && return 0
+    dgpu_unit_exists || return 1
+
+    local we_started=0
+    systemctl is-active --quiet "$DGPU_UNIT" || we_started=1
+    systemctl start "$DGPU_UNIT" >/dev/null 2>&1 || return 1
+
+    # udev "add" is async — poll for the output rather than racing it.
+    local i=0
+    for _ in $(seq 1 40); do
+        detect_outputs
+        [ -n "$EXTERNAL" ] && return 0
+        i=$((i + 1))
+        # Once the card exists the physical link state is readable. If the port
+        # reports no monitor there is nothing to wait for — but give the
+        # connector ~1.5s to be probed first, so a not-yet-read EDID is not
+        # mistaken for an empty port.
+        if [ "$i" -ge 10 ] && [ "$(hdmi_link_status)" = "disconnected" ]; then
+            break
+        fi
+        sleep 0.15
+    done
+
+    # No external output materialised — put the rail back if we raised it.
+    if [ "$we_started" -eq 1 ]; then
+        systemctl stop "$DGPU_UNIT" >/dev/null 2>&1 || true
+        systemctl is-active --quiet "$DGPU_UNIT" && ROLLBACK_FAILED=1
+    fi
+    return 1
+}
+
+save_state() { mkdir -p "$STATE_DIR"; printf 'mode=%s\narrangement=%s\n' "$1" "$2" >"$STATE_FILE"; }
+
+load_state() {
+    SAVED_MODE="extend"; SAVED_ARRANGEMENT="right"
+    if [ -f "$STATE_FILE" ]; then
+        while IFS='=' read -r k v; do
+            case "$k" in
+                mode) [ -n "$v" ] && SAVED_MODE="$v" ;;
+                arrangement) [ -n "$v" ] && SAVED_ARRANGEMENT="$v" ;;
+            esac
+        done <"$STATE_FILE"
+    fi
+}
+
+# --- commands ---------------------------------------------------------------
+
+# Hot path — polled by the sidebar. Deliberately 2 subprocesses total (niri +
+# jq): one query, one pass that does discovery, state and JSON assembly at once.
+# The mode is derived from what niri is actually driving, so the UI stays honest
+# if something else (unplug, resume, the dGPU toggle) changed things.
+cmd_status() {
+    local j out dgpu=false dmode
+    j="$(outputs_json)" || j=""
+    [ -z "$j" ] && j='{}'
+    load_state
+    dgpu_unit_exists && dgpu=true
+    dmode="$(dgpu_mode)"
+
+    out="$("$JQ" -c -n --argjson o "$j" --arg arrangement "$SAVED_ARRANGEMENT" \
+                    --argjson dgpuUnit "$dgpu" --arg dgpuMode "$dmode" '
+        ($o | keys) as $n
+        | (($n | map(select(startswith("eDP")))       | first) // "eDP-1") as $int
+        | (($n | map(select(startswith("eDP") | not)) | first) // "")       as $ext
+        | ($o[$int].logical != null)                                        as $ion
+        | (($ext != "") and ($o[$ext].logical != null))                     as $eon
+        | {
+            mode: (if $ion and $eon then "extend"
+                   elif $ion then "internal"
+                   elif $eon then "external"
+                   else "none" end),
+            arrangement: $arrangement,
+            internal: $int,
+            external: $ext,
+            internalOn: $ion,
+            externalOn: $eon,
+            externalPresent: ($ext != ""),
+            dgpuUnit: $dgpuUnit,
+            dgpuMode: $dgpuMode
+          }
+    ' 2>/dev/null)"
+    [ -z "$out" ] && return 1
+    echo "$out"
+
+    # Fold the safety net in for free: only pay for recovery when it is actually
+    # needed, rather than running a second discovery pass on every poll.
+    case "$out" in
+        *'"mode":"none"'*) cmd_guard ;;
+    esac
+}
+
+cmd_set() {
+    local mode="$1" arrangement="${2:-}"
+    load_state
+    [ -z "$arrangement" ] && arrangement="$SAVED_ARRANGEMENT"
+    detect_outputs
+
+    case "$mode" in
+        extend|external)
+            if ! ensure_external_live; then
+                case "$(hdmi_link_status)" in
+                    disconnected)
+                        msg="no monitor detected on HDMI - the port reports disconnected with no EDID. Check the cable is seated and the monitor is powered on."
+                        [ "$ROLLBACK_FAILED" -eq 1 ] && msg="$msg WARNING: the dGPU could not be powered back down (niri holds its DRM card, and an in-session hot-remove would hang the kernel). It will draw ~18W extra until you log out."
+                        die "$msg" ;;
+                    connected)
+                        die "HDMI reports a monitor but niri did not adopt the output. Check: journalctl --user -u niri.service" ;;
+                    *)
+                        die "the dGPU HDMI connector is not present - $DGPU_UNIT could not bring it up. Check: journalctl -u $DGPU_UNIT" ;;
+                esac
+            fi
+            ;;
+        internal) ;;
+        *) die "unknown mode: $mode" ;;
+    esac
+
+    write_kdl "$mode" "$arrangement"
+
+    # External-only is applied on top of the persisted extend layout, as a
+    # temporary change. Must happen AFTER the reload, which would wipe it.
+    if [ "$mode" = "external" ]; then
+        "$NIRI" msg output "$INTERNAL" off >/dev/null 2>&1 \
+            || die "could not blank $INTERNAL"
+    fi
+
+    save_state "$mode" "$arrangement"
+}
+
+# Recover from "no display is on at all" — e.g. external-only was active and the
+# external went away on resume or unplug. Turning the panel back on is always
+# safe, so this never needs to ask.
+cmd_guard() {
+    detect_outputs
+    output_on "$INTERNAL" && return 0
+    [ -n "$EXTERNAL" ] && output_on "$EXTERNAL" && return 0
+    "$NIRI" msg output "$INTERNAL" on >/dev/null 2>&1
+    save_state "extend" "$(load_state; echo "$SAVED_ARRANGEMENT")"
+    echo "recovered: re-enabled $INTERNAL (no output was on)" >&2
+}
+
+# Release the dGPU: put niri back on the built-in panel, then ask the display
+# service to power the card down. The teardown legitimately REFUSES while niri
+# holds the DRM card (an in-session hot-remove hangs the kernel ~8min), so we
+# verify the outcome and say plainly when the rail is stuck until logout.
+cmd_release_dgpu() {
+    load_state
+    detect_outputs
+    write_kdl internal "$SAVED_ARRANGEMENT"
+    save_state internal "$SAVED_ARRANGEMENT"
+
+    [ "$(dgpu_mode)" = "off" ] && { echo "dGPU already off"; return 0; }
+
+    systemctl stop "$DGPU_UNIT" >/dev/null 2>&1 || true
+    sleep 1
+    if [ "$(dgpu_mode)" = "display" ]; then
+        systemctl reset-failed "$DGPU_UNIT" >/dev/null 2>&1 || true
+        die "dGPU could not be released: niri still holds its DRM card, and an in-session hot-remove would hang the kernel. It keeps drawing ~18W until you log out."
+    fi
+    echo "dGPU released"
+}
+
+cmd_arrange() {
+    load_state
+    cmd_set "extend" "$1"
+}
+
+case "${1:-status}" in
+    status)  cmd_status ;;
+    guard)   cmd_guard ;;
+    release-dgpu) cmd_release_dgpu ;;
+    set)     shift; [ $# -ge 1 ] || die "set needs a mode"; cmd_set "$@" ;;
+    arrange) shift; [ $# -ge 1 ] || die "arrange needs a direction"; cmd_arrange "$1" ;;
+    *) die "usage: niri-display-mode {status|set <mode> [arrangement]|arrange <dir>}" ;;
+esac

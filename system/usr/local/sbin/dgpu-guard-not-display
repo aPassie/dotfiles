@@ -1,0 +1,15 @@
+#!/bin/bash
+# ExecStartPre guard for dgpu-compute.service (Finding 4): refuse to start compute
+# mode while the dGPU is already in DISPLAY mode (nvidia_drm loaded).
+#
+# Rationale: display mode is a SUPERSET of compute -- it also loads nvidia+uvm, so
+# CUDA already works there. A display->compute switch would require tearing down
+# the KMS stack / hot-removing the card while niri holds it, which hangs (~8min
+# D-state). So there is nothing to gain and a lot to lose -- refuse cleanly.
+# For compute-only, turn off Display and log out first.
+if lsmod | grep -q '^nvidia_drm'; then
+    echo "ERROR: dGPU is in DISPLAY mode; CUDA already works there. Refusing compute-mode start (an in-session switch would hang). Turn off Display + log out first for compute-only." >&2
+    logger -t dgpu-enable "compute start refused by guard: display mode active (nvidia_drm loaded)"
+    exit 1
+fi
+exit 0

@@ -1,0 +1,15 @@
+[Unit]
+Description=NVIDIA dGPU - display (external monitor via HDMI) mode
+# No [Install]/WantedBy: never auto-started at boot. Default stays OFF.
+# Display mode is a superset of compute -- it also loads nvidia + nvidia_uvm,
+# so CUDA works while the external monitor is on.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Display and compute are mutually exclusive modes of the one dGPU. Stop the
+# other mode first (synchronous; '-' ignores it if it wasn't running) so the
+# rail-off and rail-on never overlap. Runs as root -> no polkit needed.
+ExecStartPre=-/usr/bin/systemctl stop dgpu-compute.service
+ExecStart=/usr/local/sbin/dgpu-enable-display.sh
+ExecStop=/usr/local/sbin/dgpu-disable.sh

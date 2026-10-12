@@ -1,0 +1,20 @@
+[Unit]
+Description=Power off the NVIDIA dGPU display when the graphical session ends
+# Ordered Before=niri.service so that on session stop we stop AFTER niri — by
+# then niri has released the dGPU (/dev/nvidia*), so the teardown finds no
+# holders and powers the rail off cleanly (no spin). PartOf ties us to the
+# session lifecycle so we stop when the session does.
+PartOf=graphical-session.target
+Before=niri.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# At logout: niri is already gone, so this stop runs dgpu-disable.sh which finds
+# the card free and powers it off. If display mode wasn't active, stopping the
+# already-inactive unit is an instant no-op — zero cost on normal logouts.
+ExecStop=/usr/bin/systemctl stop dgpu-display.service
+
+[Install]
+WantedBy=graphical-session.target

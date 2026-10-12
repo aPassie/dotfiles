@@ -1,0 +1,121 @@
+#!/bin/bash
+# glass-doctor — checks that a package update has not broken the glass desktop, repairs what it
+# can, and tells you about the rest in a notification. Runs by itself after every pacman
+# transaction and at login (glass-doctor.path / glass-doctor.service); safe to run by hand.
+#
+#   glass-doctor          run the checks (the slow Dolphin check only if its packages changed)
+#   glass-doctor --full   run every check regardless
+#   glass-doctor --report show the last report
+#
+# It never needs a password and never removes or downgrades packages.
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/glass-doctor"; mkdir -p "$STATE"
+REPORT="$STATE/last-report.txt"
+[ "$1" = --report ] && { cat "$REPORT" 2>/dev/null || echo "no report yet"; exit 0; }
+FULL=0; [ "$1" = --full ] && FULL=1
+
+# wait for pacman to finish (the path unit fires while the transaction is still running)
+for _ in $(seq 60); do [ -e /var/lib/pacman/db.lck ] || break; sleep 5; done
+
+PROBLEMS=(); FIXED=(); OK=()
+problem() { PROBLEMS+=("$1"); }
+fixed() { FIXED+=("$1"); }
+ok() { OK+=("$1"); }
+ver() { pacman -Q "$@" 2>/dev/null | tr '\n' ';'; }
+changed() { # changed <key> <packages...> : true when their versions differ from the last run
+    local now; now=$(ver "${@:2}"); local f="$STATE/ver-$1"
+    [ -e "$f" ] || { echo "$now" > "$f"; return 1; }   # first run: just remember them
+    [ "$(cat "$f")" != "$now" ] && { echo "$now" > "$f.new"; return 0; }
+    return 1
+}
+accept() { [ -e "$STATE/ver-$1.new" ] && mv "$STATE/ver-$1.new" "$STATE/ver-$1"; }
+
+# 0. keep a copy of the current state before touching anything
+"$HOME/.local/bin/glass-snapshot" "before glass-doctor run" >/dev/null 2>&1
+
+# 1. Dolphin's toolbar file: Dolphin ignores it once its own built-in copy has a higher version
+#    number, which happens on Dolphin updates. Ours carries 9999 so it always wins.
+RC="$HOME/.local/share/kxmlgui5/dolphin/dolphinui.rc"
+if [ -f "$RC" ]; then
+    v=$(grep -m1 -o '<gui[^>]*version="[0-9]*"' "$RC" | grep -o '[0-9]*"$' | tr -d '"')
+    if [ "${v:-0}" -lt 9000 ]; then
+        python3 -I - "$RC" <<'PY' && fixed "Dolphin toolbar file: version number raised again (was $v)"
+import re,sys
+p=sys.argv[1]; t=open(p).read()
+t2,n=re.subn(r'(<gui\b[^>]*\bversion=")\d+(")', r'\g<1>9999\2', t, count=1)
+if n!=1: sys.exit(1)
+open(p,'w').write(t2)
+PY
+    else ok "Dolphin toolbar file"; fi
+else problem "Dolphin's toolbar file is missing ($RC). Bring it back: glass-snapshot restore $RC"; fi
+
+# 2. Dolphin's glass shim: compiled against Qt and KDE Frameworks, so rebuild it when those or
+#    Dolphin change, then try it in an invisible Dolphin. If that fails the shim is set aside:
+#    Dolphin then opens without the breadcrumb/SF icons instead of not opening at all.
+D="$HOME/.config/dolphin-macos"; SHIM="$D/glass-shim/glass-shim.so"
+try_dolphin() { # runs Dolphin on the offscreen platform; succeeds if it stays up with the shim working
+    local t; t=$(mktemp -d); cp -r "$D/Kvantum" "$D/kdeglobals" "$t/" 2>/dev/null
+    ( cd /tmp; exec env XDG_CONFIG_HOME="$t" QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=kde QT_STYLE_OVERRIDE=kvantum \
+        ${1:+LD_PRELOAD="$1" GLASS_SHIM_SELFTEST="$t/self.log"} /usr/bin/dolphin -stylesheet "$D/glass.qss" --new-window "$HOME" >/dev/null 2>&1 ) &
+    local p=$!; sleep 5; local good=1
+    kill -0 $p 2>/dev/null || good=0
+    if [ -n "$1" ] && [ $good = 1 ]; then grep -q 'segments=[1-9]' "$t/self.log" 2>/dev/null || good=0; fi
+    kill $p 2>/dev/null; wait $p 2>/dev/null; rm -rf "$t"
+    [ $good = 1 ]
+}
+if changed dolphin dolphin qt6-base kio kxmlgui kvantum || [ $FULL = 1 ] || [ ! -e "$SHIM" ]; then
+    if [ -e "$SHIM.disabled" ] && [ ! -e "$SHIM" ]; then mv "$SHIM.disabled" "$SHIM"; fi
+    built=1; sh "$D/glass-shim/build.sh" >"$STATE/shim-build.log" 2>&1 || built=0
+    if [ $built = 1 ] && try_dolphin "$SHIM"; then
+        ok "Dolphin + glass shim (rebuilt and tested)"
+    elif try_dolphin ""; then
+        [ -e "$SHIM" ] && mv "$SHIM" "$SHIM.disabled"
+        problem "Dolphin's glass shim no longer works with the updated packages, so it is switched off: Dolphin opens, but without the Home › Downloads breadcrumb and SF icons. Build log: $STATE/shim-build.log"
+    else
+        problem "Dolphin does not start even without the glass shim. Try it from a terminal: dolphin-macos"
+    fi
+    accept dolphin
+else ok "Dolphin (packages unchanged)"; fi
+
+# 3. The shell
+if changed shell quickshell-git qt6-base qt6-declarative qt6-wayland; then shell_changed=1; else shell_changed=0; fi
+if pgrep -x qs >/dev/null || pgrep -x quickshell >/dev/null; then
+    last=$(qs -c ii log 2>/dev/null | grep -E 'Configuration Loaded|Failed to load configuration' | tail -1)
+    case "$last" in
+        *Failed*) problem "The shell is running an OLD copy of its config: the current files fail to load. See: qs -c ii log | tail -40" ;;
+        *) ok "Shell running" ;;
+    esac
+    [ $shell_changed = 1 ] && [ -n "$(ver quickshell-git)" ] && \
+        FIXED+=("Note: Qt or Quickshell was updated. The running shell keeps working; if the bar is missing after your next login, rebuild it: yay -S quickshell-git --rebuild")
+else
+    problem "The shell is not running. Start it: qs -c ii --no-duplicate   If it refuses to start after a Qt update, rebuild it: yay -S quickshell-git --rebuild"
+fi
+accept shell
+
+# 4. niri
+if out=$(niri validate 2>&1); then ok "niri config"; else problem "niri's config no longer validates: $(echo "$out" | tail -3 | tr '\n' ' ')"; fi
+if [ -x "$HOME/.local/lib/niri-hidefrom/niri" ] && [ "$(pacman -Q niri 2>/dev/null)" != "$(cat "$HOME/.local/lib/niri-hidefrom/built-for" 2>/dev/null)" ]; then
+    FIXED+=("Note: niri was updated, so from the next login the stock niri is used until the locally patched build is rebuilt")
+fi
+
+# 5. Things that come back by themselves
+pacman -Q nautilus >/dev/null 2>&1 && problem "Nautilus was pulled back in by an update. Remove it again: sudo pacman -Rdd nautilus"
+[ -d /usr/share/icons/WhiteSur-dark/apps/scalable ] || problem "The WhiteSur icon set is gone; the app island falls back to plain icons. Reinstall: yay -S whitesur-icon-theme"
+[ "$(grep -c '^widgetStyle=kvantum' "$D/kdeglobals" 2>/dev/null)" -ge 1 ] && pacman -Q kvantum >/dev/null 2>&1 || problem "Kvantum is missing; Dolphin loses its black theme. Reinstall: sudo pacman -S kvantum"
+grep -q claude-status-hook "$HOME/.claude/settings.json" 2>/dev/null || problem "The Claude island's hooks are no longer in ~/.claude/settings.json. Bring them back: glass-snapshot restore ~/.claude/settings.json"
+
+# 6. report
+{
+    echo "glass-doctor  $(date '+%Y-%m-%d %H:%M')"
+    for l in "${PROBLEMS[@]}"; do echo "PROBLEM  $l"; done
+    for l in "${FIXED[@]}"; do echo "FIXED    $l"; done
+    for l in "${OK[@]}"; do echo "ok       $l"; done
+} > "$REPORT"
+"$HOME/.local/bin/glass-snapshot" "after glass-doctor run" >/dev/null 2>&1
+if [ ${#PROBLEMS[@]} -gt 0 ]; then
+    notify-send -a "Glass doctor" -u critical "Desktop check: ${#PROBLEMS[@]} problem(s) after an update" "$(printf '• %s\n' "${PROBLEMS[@]}" | cut -c1-240)
+Full report: glass-doctor --report" 2>/dev/null
+elif [ ${#FIXED[@]} -gt 0 ]; then
+    notify-send -a "Glass doctor" "Desktop check after update" "$(printf '• %s\n' "${FIXED[@]}" | cut -c1-240)" 2>/dev/null
+fi
+cat "$REPORT"
+[ ${#PROBLEMS[@]} -eq 0 ]
