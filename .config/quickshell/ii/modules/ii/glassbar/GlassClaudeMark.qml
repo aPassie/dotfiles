@@ -1,7 +1,8 @@
 import QtQuick
 
-// The Claude mark. While `working`, its twelve rays grow and shrink independently at random,
-// so it flickers like a spark; otherwise it is the plain logo. Each ray is the real logo
+// The Claude mark. While `working`, its twelve rays slowly grow and shrink independently at
+// random and the whole mark swells and settles, like a breathing spark; otherwise it is the
+// plain logo. Each ray is the real logo
 // clipped to that ray's wedge at a changing radius, so the shape itself is never redrawn.
 Item {
     id: root
@@ -31,7 +32,7 @@ Item {
         width: root.size * k
         height: root.size * k
         anchors.centerIn: parent
-        scale: 1 / k
+        scale: root.swell / k
         onPaint: {
             const ctx = getContext("2d")
             ctx.reset()
@@ -60,9 +61,9 @@ Item {
             const len = root.len.slice(), want = root.want.slice()
             let settled = true
             for (let i = 0; i < len.length; i++) {
-                if (root.working) { if (Math.random() < 0.07) want[i] = 0.42 + Math.random() * 0.58 }
+                if (root.working) { if (Math.random() < 0.03) want[i] = 0.42 + Math.random() * 0.58 }
                 else want[i] = 1
-                len[i] += (want[i] - len[i]) * 0.22
+                len[i] += (want[i] - len[i]) * 0.09
                 if (Math.abs(len[i] - 1) > 0.01) settled = false
             }
             root.len = len
@@ -72,5 +73,15 @@ Item {
         }
     }
     property bool settled: true
-    onWorkingChanged: if (working) settled = false
+
+    // the whole mark grows and settles while working
+    property real swell: 1
+    SequentialAnimation on swell {
+        running: root.visible && root.working
+        loops: Animation.Infinite
+        NumberAnimation { to: 1.16; duration: 1500; easing.type: Easing.InOutSine }
+        NumberAnimation { to: 0.86; duration: 1500; easing.type: Easing.InOutSine }
+    }
+    Behavior on swell { enabled: !root.working; NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+    onWorkingChanged: { if (working) settled = false; else swell = 1 }
 }
