@@ -87,7 +87,7 @@ Scope {
                 width: 20
                 height: 20
                 sourceSize: Qt.size(60, 60)
-                source: Qt.resolvedUrl("../../../assets/icons/glassbar/claude.svg")
+                source: Qt.resolvedUrl("../../../assets/icons/glassbar/claude-mark.svg")
             }
             Column {
                 id: text
