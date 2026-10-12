@@ -40,7 +40,7 @@ yay -S --needed - < packages/aur.txt        # needs an AUR helper
 ./install.sh
 ```
 
-Then the four things the script cannot do:
+Then the things the script cannot do:
 
 1. **SF Pro font.** The bar's symbols come from Apple's *SF Pro Text Medium*, which cannot be
    redistributed. Download "SF Pro" from <https://developer.apple.com/fonts/>, extract
@@ -49,9 +49,15 @@ Then the four things the script cannot do:
 2. **Wallpaper.** niri starts `swaybg` with `~/Downloads/desktopbg.jpg`. Put an image there or
    change the last line of `.config/niri/config.d/50-startup.kdl`. The bar derives its tint
    from this image.
-3. **Weather.** Set `bar.weather.city` in `~/.config/illogical-impulse/config.json`.
-4. **Hardware files.** Everything under `system/` is for one specific laptop (hybrid-GPU power
-   scripts, TLP profile, Wi-Fi driver options). Skip it on other hardware.
+3. **Lock-screen image.** `~/.config/hypr/hyprlock.conf` names a picture under
+   `~/Pictures/Wallpapers/` (`path = ...`). Put an image there or change the path.
+4. **Weather.** Set `bar.weather.city` in `~/.config/illogical-impulse/config.json`.
+5. **Fish prompt.** `fisher update` installs the tide prompt listed in `fish_plugins`.
+6. **Dictation (optional).** Holding Right Ctrl needs a Python environment and a speech model
+   that are not in this repository; `CLAUDE.md` has the steps. Until then `pttd.service` stays off.
+7. **Hardware files.** Everything under `system/` is for one specific laptop (hybrid-GPU power
+   scripts, TLP profile, Wi-Fi driver options, login-screen theme setting). Skip it on other
+   hardware.
 
 Log out and choose the niri session.
 

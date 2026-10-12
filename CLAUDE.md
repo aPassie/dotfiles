@@ -13,7 +13,8 @@ verify, then run `tools/sync-from-home.sh` and commit.
 2. `./install.sh --dry-run`, then `./install.sh`. It copies `.config` and `.local` into `$HOME`
    (replaced files go to `~/.dotfiles-backup-<date>`), rewrites `/home/shanks` to the new home
    path, builds Dolphin's shim, enables the user services and merges the Claude hooks.
-3. Do the manual steps the script prints: SF Pro font, wallpaper, weather city.
+3. Do the manual steps the script prints: SF Pro font, wallpaper, lock-screen image, weather
+   city, `fisher update`.
 4. Only on the same laptop (Lenovo Legion Slim 5 16APH8): install `system/` by hand. Each file
    sits at its real path under `system/` (`system/etc/...`, `system/usr/local/...`). Read
    "Hardware files" below first.
@@ -101,6 +102,17 @@ screenshots must stay on the GNOME backend (the KDE one does not work on niri).
 `~/.config/glass-snapshot-extra.txt`). Add new custom files to the snapshot list and to
 `tools/sync-from-home.sh`.
 
+### Dictation (hold Right Ctrl)
+xremap (`.config/xremap/config.yml`) turns Right Ctrl press/release into `~/.local/bin/ptt
+down|up`, which writes to a FIFO read by `~/.local/share/ptt/pttd.py` (`pttd.service`); the
+text is typed with `wtype` on release. Only `pttd.py` is in the repository. To set it up:
+`uv venv ~/.local/share/ptt/.venv`, install the `moondream` package into it, then replace the
+CUDA build of torch with the CPU build from the PyTorch CPU index and uninstall the `nvidia-*`,
+`cuda-*` and `triton` packages (6 GB down to about 1.6 GB). Run the daemon once with network
+access so the "moondream/parakeet-redux" model downloads (the unit sets `HF_HUB_OFFLINE=1`),
+then `systemctl --user enable --now pttd.service`. xremap does not reload its config on
+change: `systemctl --user restart xremap`.
+
 ### Hardware files (`system/`)
 For a Legion Slim 5 16APH8 (Ryzen 7840HS + RTX 4060). The NVIDIA card is powered off at boot
 and switched on only on demand:
@@ -111,7 +123,10 @@ and switched on only on demand:
 - `etc/modprobe.d/nvidia-no-autoload.conf`: stops the driver loading at boot. Without it the
   power-off can deadlock against TLP during boot and the login screen never appears.
 - `etc/udev/rules.d/99-rapl-readable.rules`: lets the battery pop-up read power draw.
-- `etc/tlp.d/01-shanks-battery.conf`, `etc/modprobe.d/mt7921e*.conf`, `etc/sddm.conf`.
+- `etc/tlp.d/01-shanks-battery.conf`, `etc/modprobe.d/mt7921e*.conf`.
+- `etc/sddm.conf` selects the login theme "silent", which is not a package: it comes from the
+  SilentSDDM project and must be installed to `/usr/share/sddm/themes/silent` first. Without
+  it, leave this file out and SDDM uses its default theme.
 
 Enable with `sudo systemctl enable disable-nvidia-dgpu.service` (the other units are started on demand). The
 polkit rule that lets the shell start the dGPU services without a password is not in this

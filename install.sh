@@ -40,9 +40,14 @@ fc-cache -f >/dev/null 2>&1 || true
 
 echo "== user services"
 systemctl --user daemon-reload
-for u in dolphin-warm.service xremap.service pttd.service dgpu-power-off.service glass-doctor.path glass-doctor.service; do
+for u in dolphin-warm.service xremap.service glass-doctor.path glass-doctor.service; do
     [ -f "$HOME/.config/systemd/user/$u" ] && systemctl --user enable "$u" >/dev/null 2>&1 && echo "   enabled $u"
 done
+# only where their other half exists: the dictation environment, the laptop's dGPU scripts
+if [ -x "$HOME/.local/share/ptt/.venv/bin/python" ]; then systemctl --user enable pttd.service >/dev/null 2>&1 && echo "   enabled pttd.service"
+else echo "   pttd.service left off (dictation environment not set up yet, see CLAUDE.md)"; fi
+if [ -x /usr/local/sbin/dgpu-disable.sh ]; then systemctl --user enable dgpu-power-off.service >/dev/null 2>&1 && echo "   enabled dgpu-power-off.service"
+else echo "   dgpu-power-off.service left off (hardware files from system/ are not installed)"; fi
 systemctl --user enable hypridle.service foot-server.socket >/dev/null 2>&1 || true
 
 echo "== Claude Code hooks for the status island"
@@ -74,7 +79,9 @@ Still to do by hand (details in README.md):
                     yay -S --needed - < packages/aur.txt
   2. SF Pro font:   put SF-Pro-Text-Medium.otf in ~/.config/quickshell/ii/assets/fonts/
   3. Wallpaper:     put an image at ~/Downloads/desktopbg.jpg (or change 50-startup.kdl)
-  4. Weather city:  set bar.weather.city in ~/.config/illogical-impulse/config.json
-  5. Hardware:      system/ holds /etc and /usr/local files for a Legion Slim 5 16APH8 only
-  6. Log out and back in to niri.
+  4. Lock screen:   hyprlock shows the image named in ~/.config/hypr/hyprlock.conf (path = ...)
+  5. Weather city:  set bar.weather.city in ~/.config/illogical-impulse/config.json
+  6. Fish prompt:   fisher update
+  7. Hardware:      system/ holds /etc and /usr/local files for a Legion Slim 5 16APH8 only
+  8. Log out and back in to niri.
 MSG

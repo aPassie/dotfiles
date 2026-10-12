@@ -77,3 +77,5 @@ git
 base-devel
 rsync
 7zip
+fisher
+eza
