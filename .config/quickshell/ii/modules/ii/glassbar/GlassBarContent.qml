@@ -398,10 +398,12 @@ Item {
                 anchors.centerIn: parent
                 height: parent.height
                 spacing: 7
-                GlassClaudeMark { // rays flicker while the session is working
+                Image { // the Claude mark; deliberately still (animating it cost about 2.4 W)
                     anchors.verticalCenter: parent.verticalCenter
-                    size: 16
-                    working: claudeIsland.visible && claudeIsland.kind === "working"
+                    width: 16
+                    height: 16
+                    sourceSize: Qt.size(48, 48)
+                    source: Qt.resolvedUrl("../../../assets/icons/glassbar/claude-mark.svg")
                 }
                 Label {
                     anchors.verticalCenter: parent.verticalCenter
