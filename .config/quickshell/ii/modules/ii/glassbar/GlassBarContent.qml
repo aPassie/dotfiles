@@ -462,15 +462,35 @@ Item {
                     GlassHoverSense { id: wifiSense }
                     GlassWifiPopup { hoverTarget: wifiSense }
                 }
-                Drawn {
-                    name: "bluetooth"
-                    width: 17.5
-                    height: 17.5
+                Item { // Bluetooth; while a sound device is connected, a headphone or a speaker instead
+                    id: btIcon
+                    // BlueZ names headsets and headphones "audio-headset" / "audio-headphones"; speakers and
+                    // other sound devices come through as "audio-card" (or "audio-speakers")
+                    readonly property var icons: BluetoothStatus.connectedDevices.map(d => String(d.icon ?? ""))
+                    readonly property bool phonesOn: icons.some(i => /headset|headphone/i.test(i))
+                    readonly property bool speakerOn: !phonesOn && icons.some(i => /^audio|speaker/i.test(i))
+                    readonly property bool audio: phonesOn || speakerOn
+                    width: audio ? phones.implicitWidth : 17.5
+                    height: parent.height
                     visible: BluetoothStatus.available
                     opacity: BluetoothStatus.enabled ? 1 : 0.4
-                    anchors.verticalCenter: parent.verticalCenter
                     scale: btSense.hovered ? 1.12 : 1
                     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                    Drawn {
+                        name: "bluetooth"
+                        visible: !btIcon.audio
+                        width: 17.5
+                        height: 17.5
+                        anchors.centerIn: parent
+                    }
+                    Glyph {
+                        id: phones
+                        visible: btIcon.audio
+                        anchors.centerIn: parent
+                        height: parent.height
+                        font.pixelSize: 14
+                        code: btIcon.phonesOn ? 0x100448 : GlassPanels.sf.speaker // SF "headphones" / speaker
+                    }
                     TapHandler { margin: 6; onTapped: GlassPanels.toggle("bluetooth") }
                     GlassHoverSense { id: btSense }
                     GlassBluetoothPopup { hoverTarget: btSense }
