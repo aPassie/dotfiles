@@ -137,6 +137,18 @@ binds {
 
 // ── Alt+Tab (built-in recent-windows) ───────────────────────────────────────
 recent-windows {
+    // Styled to sit with the glass shell: soft white rounded highlight instead of the
+    // default square grey block, amber for windows asking for attention, smaller previews.
+    highlight {
+        active-color "#ffffff2e"
+        urgent-color "#ffb22466"
+        padding 14
+        corner-radius 18
+    }
+    previews {
+        max-height 320
+        max-scale 0.35
+    }
     binds {
         Alt+Tab       { next-window scope="output"; }
         Alt+Shift+Tab { previous-window scope="output"; }
