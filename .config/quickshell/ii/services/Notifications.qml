@@ -25,6 +25,10 @@ Singleton {
             "text": action.text,
         })) ?? []
         property bool popup: false
+        // inline reply (PhoneLink's messages, KDE-style "inline-reply"), with suggested answers
+        property bool hasReply: notification?.hasInlineReply ?? false
+        property string replyPlaceholder: notification?.inlineReplyPlaceholder ?? ""
+        property var choices: { try { return JSON.parse(notification?.hints["x-phonelink-choices"] ?? "[]") } catch (e) { return [] } }
         property bool isTransient: notification?.hints.transient ?? false
         property string appIcon: notification?.appIcon ?? ""
         property string appName: notification?.appName ?? ""
@@ -151,6 +155,7 @@ Singleton {
         id: notifServer
         // actionIconsSupported: true
         actionsSupported: true
+        inlineReplySupported: true
         bodyHyperlinksSupported: true
         bodyImagesSupported: true
         bodyMarkupSupported: true
@@ -234,6 +239,12 @@ Singleton {
         root.popupList.forEach((notif) => {
             notif.popup = false;
         });
+    }
+
+    function sendReply(id, text) {
+        const n = notifServer.trackedNotifications.values.find((notif) => notif.id + root.idOffset === id)
+        if (n && n.hasInlineReply) n.sendInlineReply(text)
+        root.discardNotification(id)
     }
 
     function attemptInvokeAction(id, notifIdentifier) {

@@ -32,6 +32,7 @@ cpf .config/dolphin-macos/glass.qss .config/dolphin-macos/glass-icons .config/do
     .config/dolphin-macos/glass-shim/glass-shim.cpp .config/dolphin-macos/glass-shim/build.sh \
     .config/dolphinrc .local/share/kxmlgui5/dolphin/dolphinui.rc \
     .local/share/kio/servicemenus/glass-quicklook.desktop \
+    .local/share/kio/servicemenus/phonelink-send.desktop \
     .local/share/dbus-1/services/org.freedesktop.FileManager1.service \
     .local/share/applications/org.kde.dolphin.desktop
 # ── Qt / GTK look ───────────────────────────────────────────────────────────
@@ -49,14 +50,14 @@ cpf .config/foot .config/fish/config.fish .config/fish/conf.d .config/fish/fish_
 cpf .config/xremap .local/bin/ptt .local/share/ptt/pttd.py
 # ── user services ───────────────────────────────────────────────────────────
 for u in dgpu-power-off.service dolphin-warm.service pttd.service xremap.service \
-         screenoff-after-lock.service screenoff-after-lock.timer glass-doctor.service glass-doctor.path; do
+         screenoff-after-lock.service screenoff-after-lock.timer glass-doctor.service glass-doctor.path phonelinkd.service; do
     cpf ".config/systemd/user/$u"
 done
 # ── scripts ─────────────────────────────────────────────────────────────────
 cpf .local/bin/claude-status-hook .local/bin/claude-status-list .local/bin/dolphin-macos \
     .local/bin/glass-quicklook .local/bin/glass-snapshot .local/bin/glass-doctor \
     .local/bin/ii-battery-power .local/bin/niri-display-mode .local/bin/niri-record \
-    .local/bin/idle-inhibit-toggle .local/bin/keep-awake-locked
+    .local/bin/idle-inhibit-toggle .local/bin/keep-awake-locked .local/bin/phonelink .local/bin/phonelinkd
 
 # ── leave private things out ────────────────────────────────────────────────
 rm -f  .config/quickshell/ii/assets/fonts/SF-Pro-*.otf        # Apple's font: not redistributable

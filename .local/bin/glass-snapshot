@@ -45,7 +45,8 @@ PATHS=(
     .local/bin/glass-quicklook .local/bin/glass-snapshot .local/bin/glass-doctor
     .local/bin/ii-battery-power .local/bin/niri-display-mode
     .local/bin/niri-record .local/bin/idle-inhibit-toggle .local/bin/keep-awake-locked
-    .local/bin/ptt
+    .local/bin/ptt .local/bin/phonelink .local/bin/phonelinkd
+    .local/share/kio/servicemenus/phonelink-send.desktop
     .claude/settings.json
 )
 # More paths of your own, one per line relative to $HOME (private things that are not in the

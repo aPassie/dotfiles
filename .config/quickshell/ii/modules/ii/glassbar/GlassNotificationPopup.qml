@@ -34,6 +34,7 @@ Scope {
         exclusiveZone: 0
         WlrLayershell.namespace: "quickshell:glass"
         WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand // the reply field
         anchors {
             top: true
             right: true
@@ -101,7 +102,13 @@ Scope {
                             if (containsMouse) { leave.stop(); Notifications.cancelTimeout(modelData.notificationId) }
                             else leave.restart()
                         }
-                        Timer { id: leave; interval: 2500; onTriggered: Notifications.timeoutNotification(card.modelData.notificationId) }
+                        Timer { id: leave; interval: 2500; onTriggered: if (!card.replying) Notifications.timeoutNotification(card.modelData.notificationId) }
+                        property bool replying: false
+                        function send() {
+                            const text = field.text.trim()
+                            if (text.length === 0) return
+                            Notifications.sendReply(modelData.notificationId, text)
+                        }
 
                         Rectangle { // divider between notifications
                             visible: card.index > 0
@@ -173,9 +180,19 @@ Scope {
                                 text: card.modelData.body
                             }
                             Row {
-                                visible: card.modelData.actions.length > 0
+                                visible: card.modelData.actions.length > 0 || card.modelData.hasReply
                                 topPadding: 5
                                 spacing: 6
+                                MouseArea { // opens the reply field
+                                    id: replyBtn
+                                    visible: card.modelData.hasReply && !card.replying
+                                    width: replyText.implicitWidth + 20
+                                    height: 22
+                                    hoverEnabled: true
+                                    onClicked: { card.replying = true; Notifications.cancelTimeout(card.modelData.notificationId); field.forceActiveFocus() }
+                                    Rectangle { anchors.fill: parent; radius: 10; color: Qt.rgba(1, 1, 1, replyBtn.containsMouse ? 0.26 : 0.14) }
+                                    GlassText { id: replyText; anchors.centerIn: parent; font.pixelSize: 11; text: Translation.tr("Reply") }
+                                }
                                 Repeater {
                                     model: card.modelData.actions.slice(0, 3)
                                     MouseArea {
@@ -187,6 +204,70 @@ Scope {
                                         onClicked: Notifications.attemptInvokeAction(card.modelData.notificationId, act.modelData.identifier)
                                         Rectangle { anchors.fill: parent; radius: 10; color: Qt.rgba(1, 1, 1, act.containsMouse ? 0.26 : 0.14) }
                                         GlassText { id: actText; anchors.centerIn: parent; font.pixelSize: 11; text: act.modelData.text }
+                                    }
+                                }
+                            }
+                            Flow { // suggested replies
+                                visible: card.replying && card.modelData.choices.length > 0
+                                width: parent.width
+                                topPadding: 6
+                                spacing: 6
+                                Repeater {
+                                    model: card.replying ? card.modelData.choices : []
+                                    MouseArea {
+                                        id: chip
+                                        required property var modelData
+                                        width: chipText.implicitWidth + 22
+                                        height: 26
+                                        hoverEnabled: true
+                                        onClicked: Notifications.sendReply(card.modelData.notificationId, chip.modelData)
+                                        Rectangle { anchors.fill: parent; radius: 13; color: Qt.rgba(1, 1, 1, chip.containsMouse ? 0.24 : 0.13) }
+                                        GlassText { id: chipText; anchors.centerIn: parent; font.pixelSize: 11; text: chip.modelData }
+                                    }
+                                }
+                            }
+                            Item { // reply field: Enter sends, Esc closes
+                                visible: card.replying
+                                width: parent.width
+                                height: visible ? 42 : 0
+                                Rectangle {
+                                    y: 6
+                                    width: parent.width
+                                    height: 34
+                                    radius: 17
+                                    color: Qt.rgba(0, 0, 0, 0.35)
+                                    border.width: 1
+                                    border.color: Qt.rgba(1, 1, 1, field.activeFocus ? 0.4 : 0.18)
+                                    TextInput {
+                                        id: field
+                                        x: 14
+                                        width: parent.width - 52
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: "white"
+                                        selectionColor: Qt.rgba(1, 1, 1, 0.3)
+                                        font.family: Appearance.font.family.main
+                                        font.pixelSize: 13
+                                        clip: true
+                                        Keys.onReturnPressed: card.send()
+                                        Keys.onEnterPressed: card.send()
+                                        Keys.onEscapePressed: { card.replying = false; text = "" }
+                                        GlassText {
+                                            visible: field.text.length === 0
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: Qt.rgba(1, 1, 1, 0.45)
+                                            font.weight: Font.Normal
+                                            text: card.modelData.replyPlaceholder || Translation.tr("Reply…")
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: sendBtn
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 26; height: 26
+                                        onClicked: card.send()
+                                        Rectangle { anchors.fill: parent; radius: 13; color: "white"; opacity: field.text.length > 0 ? 1 : 0.4 }
+                                        Text { anchors.centerIn: parent; text: "↑"; color: "#1e1a14"; font.pixelSize: 14; font.weight: Font.Bold }
                                     }
                                 }
                             }

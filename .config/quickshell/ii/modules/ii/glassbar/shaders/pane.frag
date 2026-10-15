@@ -40,7 +40,14 @@ void main() {
     // shadow, only outside the pane
     vec2 sq = abs(c - vec2(0.0, 5.0)) - (half_ - radius);
     float sd = length(max(sq, 0.0)) + min(max(sq.x, sq.y), 0.0) - radius;
-    float shadow = (1.0 - body) * 0.38 * exp(-max(sd, 0.0) / 9.0);
+    // a light, rounded shadow that follows the glass and is gone well inside the margin
+    float reach = max(margin - 6.0, 4.0);
+    float fall = 1.0 - clamp(max(sd, 0.0) / reach, 0.0, 1.0);
+    float shadow = (1.0 - body) * 0.22 * fall * fall;
+    // fade the shadow to nothing before the edge of the drawing area, or its cut-off shows as a box
+    vec2 px = qt_TexCoord0 * size;
+    float edge = min(min(px.x, px.y), min(size.x - px.x, size.y - px.y));
+    shadow *= smoothstep(0.0, margin * 0.6, edge);
 
     fragColor = (vec4(col * a, a) * body + vec4(0.0, 0.0, 0.0, shadow)) * qt_Opacity;
 }

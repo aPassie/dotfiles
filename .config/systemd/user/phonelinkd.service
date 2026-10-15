@@ -1,0 +1,12 @@
+[Unit]
+Description=PhoneLink: notifications, clipboard and files with the phone over Bluetooth
+After=graphical-session.target bluetooth.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/phonelinkd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

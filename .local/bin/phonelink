@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""phonelink — talk to the running phonelinkd.
+
+  phonelink                     show the link state
+  phonelink send FILE...        send files to the phone
+  phonelink clip                send the laptop's clipboard to the phone now
+  phonelink answer | decline    answer or end the ringing call
+  phonelink wifi                connect over Wi-Fi Direct (phone's Bluetooth off; tap Connect over Wi-Fi on the phone too)
+"""
+import json
+import os
+import socket
+import sys
+
+SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "phonelink.sock")
+
+
+def ask(req):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    try:
+        s.connect(SOCK)
+    except OSError:
+        sys.exit("phonelinkd is not running (systemctl --user start phonelinkd)")
+    s.sendall((json.dumps(req) + "\n").encode())
+    return json.loads(s.makefile().readline() or "{}")
+
+
+def main(argv):
+    if not argv:
+        st = ask({"cmd": "status"})
+        if not st.get("connected"):
+            print("phone: not connected")
+        else:
+            bat = f", battery {st['battery']}%{' (charging)' if st.get('charging') else ''}" if st.get("battery", -1) >= 0 else ""
+            print(f"phone: {st.get('name') or 'connected'}{bat}")
+            if st.get("call") and st["call"] != "idle":
+                print(f"call: {st['call']} {st.get('caller', '')}")
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "send":
+        if not rest:
+            sys.exit("usage: phonelink send FILE...")
+        r = ask({"cmd": "send", "paths": [os.path.abspath(p) for p in rest]})
+        for p, res in zip(rest, r.get("results", [])):
+            print(f"{p}: {'sending' if res == 'ok' else res}")
+        return 0 if r.get("ok") else 1
+    if cmd == "clip":
+        return 0 if ask({"cmd": "clip"}).get("ok") else 1
+    if cmd == "wifi":
+        r = ask({"cmd": "wifi"})
+        print("looking for the phone for two minutes — tap Connect over Wi-Fi on it" if r.get("ok") else r.get("result"))
+        return 0 if r.get("ok") else 1
+    if cmd in ("answer", "decline"):
+        return 0 if ask({"cmd": "call", "action": cmd}).get("ok") else 1
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

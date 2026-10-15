@@ -11,7 +11,7 @@ import qs.services
 Singleton {
     id: root
 
-    property string open: ""            // "", "wifi", "bluetooth", "notifications", "control", "app" or "claude"
+    property string open: ""            // "", "wifi", "bluetooth", "notifications", "control", "app", "claude" or "phone"
     property real statusRight: 0        // right edge of the status island, in screen px
     property bool anchorHovered: false  // pointer is over the status island
     property string controlDetail: ""   // Control Centre: which control's settings are showing

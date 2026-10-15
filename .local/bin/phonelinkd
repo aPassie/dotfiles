@@ -1,0 +1,956 @@
+#!/usr/bin/env python3
+"""phonelinkd — the laptop side of PhoneLink.
+
+Waits for the phone over Bluetooth (RFCOMM, see ../PROTOCOL.md) and:
+  * shows the phone's notifications as desktop notifications (actions and dismissal go back),
+  * keeps the clipboards of both sides in step,
+  * receives files into ~/Downloads and sends files the user picks,
+  * writes the link state to ~/.local/state/phonelink/state.json for the shell.
+
+Local control: a Unix socket at $XDG_RUNTIME_DIR/phonelink.sock taking one JSON line per
+request, used by the `phonelink` command (send a file, send the clipboard, show the state).
+"""
+import base64
+import json
+import mimetypes
+import os
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+import uuid as uuidlib
+
+import dbus
+import dbus.mainloop.glib
+import dbus.service
+import gi
+
+gi.require_version("GLib", "2.0")
+from gi.repository import GLib  # noqa: E402
+
+SERVICE_UUID = "6c1e5a3d-2f0b-4c7e-9a51-7f3c2b9d8e10"
+PROFILE_PATH = "/org/phonelink/profile"
+VERSION = 1
+CHUNK = 64 * 1024
+HOME = os.path.expanduser("~")
+STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.join(HOME, ".local/state")), "phonelink")
+STATE_FILE = os.path.join(STATE_DIR, "state.json")
+DOWNLOADS = os.path.join(HOME, "Downloads")
+RUNTIME = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+CONTROL = os.path.join(RUNTIME, "phonelink.sock")
+ICON_DIR = os.path.join(RUNTIME, "phonelink-icons")
+
+
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+# ── desktop notifications ────────────────────────────────────────────────────
+class Desktop:
+    """Posts the phone's notifications and reports what the user does with them."""
+
+    def __init__(self, bus, link):
+        self.link = link
+        obj = bus.get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
+        self.n = dbus.Interface(obj, "org.freedesktop.Notifications")
+        self.by_phone = {}   # phone id -> desktop id
+        self.by_desk = {}    # desktop id -> phone id
+        self.reply_index = {}  # phone id -> index of its reply action
+        self.closing = set() # desktop ids we closed ourselves
+        bus.add_signal_receiver(self._action, "ActionInvoked", "org.freedesktop.Notifications")
+        bus.add_signal_receiver(self._closed, "NotificationClosed", "org.freedesktop.Notifications")
+        bus.add_signal_receiver(self._replied, "NotificationReplied", "org.freedesktop.Notifications")
+        os.makedirs(ICON_DIR, exist_ok=True)
+
+    def show(self, m):
+        pid = m["id"]
+        if m.get("call"):
+            # calls get the shell's own call pop-up (state file), not a notification
+            self.link.call_notif(m)
+            return
+        actions = []
+        for a in m.get("actions", []):
+            if a.get("reply"):
+                self.reply_index[pid] = a["i"]
+                actions += ["inline-reply", a.get("label") or "Reply"]
+                continue
+            actions += [f"a{a['i']}", a["label"]]
+        icon = ""
+        if m.get("icon"):
+            icon = os.path.join(ICON_DIR, f"{abs(hash(m.get('app', ''))) % 10**9}.png")
+            try:
+                with open(icon, "wb") as f:
+                    f.write(base64.b64decode(m["icon"]))
+            except Exception:
+                icon = ""
+        hints = {"desktop-entry": dbus.String("phonelink"), "x-phonelink-app": dbus.String(m.get("app", ""))}
+        if m.get("call"):
+            hints["urgency"] = dbus.Byte(2)
+            hints["category"] = dbus.String("call.incoming")
+        if icon:
+            hints["image-path"] = dbus.String(icon)
+        if m.get("choices"):
+            hints["x-phonelink-choices"] = dbus.String(json.dumps(m["choices"][:4]))
+        replaces = self.by_phone.get(pid, 0)
+        title = m.get("title") or m.get("appName") or "Phone"
+        body = m.get("text") or ""
+        app = m.get("appName") or "Phone"
+        try:
+            did = int(self.n.Notify(app, dbus.UInt32(replaces), icon or "phone", title, body,
+                                    dbus.Array(actions, signature="s"), hints, dbus.Int32(0 if m.get("call") else -1)))
+        except dbus.DBusException as e:
+            log("notify failed:", e)
+            return
+        self.by_phone[pid] = did
+        self.by_desk[did] = pid
+
+    def remove(self, pid):
+        self.link.call_notif_removed(pid)
+        did = self.by_phone.pop(pid, None)
+        if did is None:
+            return
+        self.by_desk.pop(did, None)
+        self.closing.add(did)
+        try:
+            self.n.CloseNotification(dbus.UInt32(did))
+        except dbus.DBusException:
+            pass
+
+    def clear(self):
+        for pid in list(self.by_phone):
+            self.remove(pid)
+
+    def _action(self, did, key):
+        pid = self.by_desk.get(int(did))
+        if pid is not None and str(key).startswith("a"):
+            log("button pressed:", key)
+            self.link.send({"type": "action", "id": pid, "i": int(str(key)[1:])})
+
+    def _replied(self, did, text):
+        pid = self.by_desk.get(int(did))
+        if pid is not None and pid in self.reply_index:
+            log(f"reply sent ({len(str(text))} chars)")
+            self.link.send({"type": "action", "id": pid, "i": self.reply_index[pid], "text": str(text)})
+
+    def _closed(self, did, reason):
+        did = int(did)
+        if did in self.closing:
+            self.closing.discard(did)
+            return
+        pid = self.by_desk.pop(did, None)
+        if pid is not None:
+            self.by_phone.pop(pid, None)
+            if int(reason) == 2:  # dismissed by the user
+                self.link.send({"type": "dismiss", "id": pid})
+
+    def toast(self, title, body, action=None):
+        actions = dbus.Array([action[0], action[1]] if action else [], signature="s")
+        try:
+            return int(self.n.Notify("PhoneLink", dbus.UInt32(0), "phone", title, body, actions,
+                                     {"desktop-entry": dbus.String("phonelink")}, dbus.Int32(-1)))
+        except dbus.DBusException:
+            return 0
+
+
+# ── clipboard ────────────────────────────────────────────────────────────────
+class Clipboard:
+    """Watches the Wayland clipboard; sets it when the phone sends text."""
+
+    def __init__(self, link):
+        self.link = link
+        self.last = None  # last text that crossed the link (either way), to avoid echoes
+        self.buf = b""
+        self.proc = subprocess.Popen(
+            ["wl-paste", "--type", "text", "--watch", "sh", "-c", "cat; printf '\\0'"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        GLib.io_add_watch(self.proc.stdout.fileno(), GLib.IO_IN | GLib.IO_HUP, self._read)
+
+    def _read(self, fd, cond):
+        data = os.read(fd, 65536)
+        if not data:
+            return False
+        self.buf += data
+        while b"\0" in self.buf:
+            chunk, self.buf = self.buf.split(b"\0", 1)
+            text = chunk.decode("utf-8", "replace")
+            if text and text != self.last and len(text) < 1_000_000:
+                self.last = text
+                self.link.send({"type": "clip", "text": text})
+        return True
+
+    def set(self, text):
+        self.last = text
+        try:
+            subprocess.run(["wl-copy", "--", text], timeout=5)
+        except Exception as e:
+            log("wl-copy failed:", e)
+
+    def current(self):
+        try:
+            return subprocess.run(["wl-paste", "--no-newline", "--type", "text"], capture_output=True,
+                                  timeout=5).stdout.decode("utf-8", "replace")
+        except Exception:
+            return ""
+
+
+# ── a framed connection (the Bluetooth link, or the Wi-Fi Direct fast lane) ───
+class Conn:
+    """One socket carrying PROTOCOL.md frames. Calls on_frame(conn, header, payload) and on_close(conn, why)."""
+
+    def __init__(self, sock, name, on_frame, on_close, on_drain=None):
+        sock.setblocking(False)
+        self.sock, self.name = sock, name
+        self.on_frame, self.on_close, self.on_drain = on_frame, on_close, on_drain
+        self.inbuf = b""
+        self.outq = []
+        self.out_watch = None
+        self.alive = True
+        self.queued = 0    # bytes ever queued on this connection
+        self.written = 0   # bytes the socket actually took
+        self.in_watch = GLib.io_add_watch(sock.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self._readable)
+
+    def close(self, why):
+        if not self.alive:
+            return
+        self.alive = False
+        for w in (self.in_watch, self.out_watch):
+            if w:
+                GLib.source_remove(w)
+        self.out_watch = None
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        self.on_close(self, why)
+
+    def send(self, header, payload=b""):
+        if not self.alive:
+            return False
+        if payload:
+            header = dict(header, bin=len(payload))
+        h = json.dumps(header, separators=(",", ":")).encode()
+        frame = struct.pack(">I", len(h)) + h + payload
+        self.outq.append(frame)
+        self.queued += len(frame)
+        if self.out_watch is None:
+            self.out_watch = GLib.io_add_watch(self.sock.fileno(), GLib.IO_OUT, self._writable)
+        return True
+
+    def backlog(self):
+        return len(self.outq)
+
+    def _writable(self, fd, cond):
+        while self.outq:
+            try:
+                n = self.sock.send(self.outq[0])
+            except BlockingIOError:
+                return True
+            except OSError as e:
+                self.out_watch = None
+                self.close(f"write: {e}")
+                return False
+            self.written += n
+            if n < len(self.outq[0]):
+                self.outq[0] = self.outq[0][n:]
+                return True
+            self.outq.pop(0)
+            # top the queue up before it runs dry, so the socket never idles mid-file
+            if self.on_drain and len(self.outq) < 4:
+                self.on_drain(self)
+        if self.on_drain:
+            self.on_drain(self)
+        if self.outq:
+            return True
+        self.out_watch = None
+        return False
+
+    def _readable(self, fd, cond):
+        try:
+            data = self.sock.recv(262144)
+        except BlockingIOError:
+            return True
+        except OSError as e:
+            self.in_watch = None
+            self.close(f"read: {e}")
+            return False
+        if not data:
+            self.in_watch = None
+            self.close("closed by the phone")
+            return False
+        self.inbuf += data
+        while len(self.inbuf) >= 4:
+            n = struct.unpack(">I", self.inbuf[:4])[0]
+            if n > 8 * 1024 * 1024:
+                self.in_watch = None
+                self.close("bad frame")
+                return False
+            if len(self.inbuf) < 4 + n:
+                break
+            try:
+                header = json.loads(self.inbuf[4:4 + n])
+            except ValueError:
+                self.in_watch = None
+                self.close("bad header")
+                return False
+            m = header.get("bin", 0)
+            if len(self.inbuf) < 4 + n + m:
+                break
+            payload = self.inbuf[4 + n:4 + n + m]
+            self.inbuf = self.inbuf[4 + n + m:]
+            try:
+                self.on_frame(self, header, payload)
+            except Exception as e:  # one bad message must not drop the link
+                log("handler error:", header.get("type"), e)
+        return True
+
+
+# ── the link: Bluetooth always, plus Wi-Fi Direct while big files move ───────
+FAST_FROM = 2 * 1024 * 1024   # files at least this big ask for the Wi-Fi Direct lane
+HELPER = "/usr/local/lib/phonelink/wifi-helper"
+
+
+class Link:
+    def __init__(self, bus):
+        self.bus = bus
+        self.bt = None          # Conn over Bluetooth
+        self.fast = None        # Conn over Wi-Fi Direct, while open
+        self.fast_state = "off" # off | asking | joining | open
+        self.fast_timer = None
+        self.device = None
+        self.state = {"connected": False, "name": "", "model": "", "battery": -1, "charging": False,
+                      "call": "idle", "caller": "", "callDetail": "", "callSince": 0, "since": 0, "fast": "off",
+                      "transfers": []}
+        self.call_pid = None
+        self.last_state_write = 0
+        self.state_pending = False
+        self.rx_files = {}      # fid -> dict(name, tmp, f, size, got)
+        self.tx_slow = []       # paths waiting for Bluetooth
+        self.tx_fast = []       # paths waiting for the Wi-Fi Direct lane
+        self.tx_active = None   # dict(fid, f, name, conn)
+        self.tx_track = []      # outgoing files still leaving the socket
+        self.track_timer = None
+        self.desktop = None
+        self.clip = None
+        self.write_state()
+
+    @property
+    def sock(self):  # "is the phone connected" for older callers
+        return self.bt
+
+    # Bluetooth lifecycle
+    def attach(self, sock, device, how="bluetooth"):
+        """The phone is connected: over Bluetooth, or (how="wi-fi") the standing Wi-Fi Direct link."""
+        if self.bt:
+            self.bt.close("replaced by a new connection")
+        self.device = device
+        self.bt = Conn(sock, "bluetooth" if how == "bluetooth" else "wi-fi direct", self.handle, self._bt_closed, self._drained)
+        alias = self.state.get("alias", "")
+        if how == "bluetooth":
+            try:
+                props = dbus.Interface(dbus.SystemBus().get_object("org.bluez", device), "org.freedesktop.DBus.Properties")
+                alias = str(props.Get("org.bluez.Device1", "Alias"))
+            except Exception:
+                pass
+        self.state.update(connected=True, since=int(time.time()), alias=alias, via=how)
+        self.write_state()
+        self.send({"type": "hello", "name": socket.gethostname(), "version": VERSION, "fast": os.path.exists(HELPER)})
+        log("connected:", device)
+
+    def detach(self, why):
+        if self.bt:
+            self.bt.close(why)
+
+    def _bt_closed(self, conn, why):
+        if conn is not self.bt:
+            return
+        log("disconnected:", why)
+        self.bt = None
+        if conn.name == "wi-fi direct":
+            self.main_wifi_down()
+        self._drop_rx()
+        self.tx_active = None if (self.tx_active and self.tx_active["conn"] is conn) else self.tx_active
+        self.close_fast("Bluetooth link closed")
+        self.state.update(connected=False, call="idle", caller="", callDetail="", callSince=0, wifiReady=self.wifi_ready())
+        self.call_pid = None
+        self.write_state()
+        if self.desktop:
+            self.desktop.clear()
+
+    def _drop_rx(self):
+        for t in self.rx_files.values():
+            t["f"].close()
+            try:
+                os.unlink(t["tmp"])
+            except OSError:
+                pass
+        self.rx_files.clear()
+
+    def write_state(self, soon=False):
+        """soon=True (progress updates): at most twice a second."""
+        if soon:
+            if self.state_pending:
+                return
+            wait = 0.5 - (time.time() - self.last_state_write)
+            if wait > 0:
+                self.state_pending = True
+                GLib.timeout_add(int(wait * 1000), lambda: (setattr(self, "state_pending", False), self.write_state(), False)[2])
+                return
+        self.last_state_write = time.time()
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(self.state, f)
+        os.replace(tmp, STATE_FILE)
+        subprocess.Popen(["timeout", "3", "qs", "-c", "ii", "ipc", "call", "phoneLink", "refresh"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def send(self, header, payload=b""):
+        """Control messages always go over Bluetooth."""
+        return self.bt.send(header, payload) if self.bt else False
+
+    # incoming frames (from either connection)
+    def handle(self, conn, m, payload):
+        t = m.get("type")
+        if t == "hello":
+            self.state.update(name=m.get("name", ""), model=m.get("model", ""))
+            self.write_state()
+            if self.clip:
+                cur = self.clip.current()
+                if cur:
+                    self.clip.last = cur
+                    self.send({"type": "clip", "text": cur})
+        elif t == "ping":
+            conn.send({"type": "pong"})
+        elif t == "notif":
+            self.desktop.show(m)
+        elif t == "notif_removed":
+            self.desktop.remove(m["id"])
+        elif t == "clip":
+            if m.get("text") and m["text"] != self.clip.last:
+                log(f"clipboard from the phone ({len(m['text'])} chars)")
+                self.clip.set(m["text"])
+        elif t == "battery":
+            self.state.update(battery=int(m.get("level", -1)), charging=bool(m.get("charging")))
+            self.write_state()
+        elif t == "call":
+            s = m.get("state", "idle")
+            if s == "offhook" and self.state.get("call") != "offhook":
+                self.state["callSince"] = int(time.time())
+            if s == "idle":
+                self.state.update(caller="", callDetail="", callSince=0)
+                self.call_pid = None
+            self.state["call"] = s
+            self.write_state()
+        elif t == "file_offer":
+            self._rx_open(m)
+        elif t == "file_chunk":
+            tr = self.rx_files.get(m.get("fid"))
+            if tr:
+                tr["f"].write(payload)
+                tr["got"] += len(payload)
+                secs = max(time.time() - tr["t0"], 0.001)
+                self._transfer(m["fid"], done=tr["got"], rate=round(tr["got"] / secs), status="active",
+                               via=conn.name)
+        elif t == "file_end":
+            self._rx_close(m.get("fid"))
+        elif t == "file_cancel":
+            tr = self.rx_files.pop(m.get("fid"), None)
+            if tr:
+                tr["f"].close()
+                os.unlink(tr["tmp"])
+            if self.tx_active and self.tx_active["fid"] == m.get("fid"):
+                self.tx_active["f"].close()
+                self.tx_active = None
+        elif t == "fast_ready":      # the phone made its Wi-Fi Direct group and is listening
+            self._join_fast(m)
+        elif t == "fast_unavailable":
+            log("fast lane unavailable:", m.get("why", ""))
+            self._fast_failed(m.get("why", "unavailable"))
+        elif t == "wifi_creds":      # details of the phone's standing Wi-Fi Direct link (for when Bluetooth is off)
+            self.save_wifi_creds(m)
+        elif t == "fast_done":       # the phone has nothing more to send on the lane
+            self._maybe_close_fast()
+
+    # calls: shown by the shell from the state file
+    def call_notif(self, m):
+        self.call_pid = m["id"]
+        self.state.update(caller=m.get("title") or "Unknown", callDetail=m.get("text") or "")
+        self.write_state()
+
+    def call_notif_removed(self, pid):
+        if pid == self.call_pid:
+            self.call_pid = None
+
+    # transfers, for the shell's phone panel
+    def _transfer(self, tid, **kw):
+        lst = self.state["transfers"]
+        for tr in lst:
+            if tr["id"] == tid:
+                tr.update(kw)
+                break
+        else:
+            lst.insert(0, dict(id=tid, **kw))
+            del lst[6:]
+        self.write_state(soon=kw.get("status") == "active")
+
+    # files from the phone
+    def _rx_open(self, m):
+        name = os.path.basename(m.get("name") or "file").strip() or "file"
+        os.makedirs(DOWNLOADS, exist_ok=True)
+        tmp = os.path.join(DOWNLOADS, f".{name}.{m['fid']}.phonelink-part")
+        self.rx_files[m["fid"]] = {"name": name, "tmp": tmp, "f": open(tmp, "wb"), "size": int(m.get("size", 0)),
+                                   "got": 0, "t0": time.time(), "via": "bluetooth"}
+        self._transfer(m["fid"], name=name, dir="in", size=int(m.get("size", 0)), done=0, rate=0, status="active",
+                       time=int(time.time()), path="", via=self.state.get("fast") == "open" and "wi-fi direct" or "bluetooth")
+
+    def _rx_close(self, fid):
+        tr = self.rx_files.pop(fid, None)
+        if not tr:
+            return
+        tr["f"].close()
+        if tr["size"] > 0 and tr["got"] != tr["size"]:
+            os.unlink(tr["tmp"])
+            self._transfer(fid, status="failed")
+            self.desktop.toast("File from phone failed", f"{tr['name']} arrived incomplete")
+            return
+        base, ext = os.path.splitext(tr["name"])
+        dest, k = os.path.join(DOWNLOADS, tr["name"]), 1
+        while os.path.exists(dest):
+            dest = os.path.join(DOWNLOADS, f"{base} ({k}){ext}")
+            k += 1
+        os.replace(tr["tmp"], dest)
+        secs = max(time.time() - tr["t0"], 0.001)
+        log(f"received {dest} ({tr['got'] / secs / 1e6:.1f} MB/s)")
+        self._transfer(fid, status="done", done=tr["got"], path=dest, name=os.path.basename(dest))
+        self.desktop.toast("File from phone", os.path.basename(dest))
+
+    # files to the phone
+    def queue_file(self, path):
+        if not os.path.isfile(path):
+            return "not a file"
+        if not self.bt:
+            return "phone not connected"
+        if os.path.getsize(path) >= FAST_FROM and os.path.exists(HELPER) and self.bt.name == "bluetooth":
+            self.tx_fast.append(path)
+            self._open_fast()
+        else:
+            self.tx_slow.append(path)
+        self._pump()
+        return "ok"
+
+    def _drained(self, conn):
+        self._pump()
+
+    def _pump(self):
+        """Feeds the active outgoing file a chunk at a time, so messages can pass in between."""
+        if not self.tx_active:
+            if self.fast and self.fast_state == "open" and self.tx_fast:
+                path, conn = self.tx_fast.pop(0), self.fast
+            elif self.bt and self.tx_slow:
+                path, conn = self.tx_slow.pop(0), self.bt
+            else:
+                if self.fast_state == "open" and not self.tx_fast:
+                    self._maybe_close_fast()
+                return
+            fid = uuidlib.uuid4().hex[:12]
+            self.tx_active = {"fid": fid, "f": open(path, "rb"), "name": os.path.basename(path), "conn": conn,
+                              "t0": time.time(), "size": os.path.getsize(path), "sent": 0}
+            self.tx_track.append({"fid": fid, "conn": conn, "base": conn.queued, "end": None, "size": os.path.getsize(path),
+                                  "t0": time.time(), "name": os.path.basename(path)})
+            self._track_tick()
+            self._transfer(fid, name=os.path.basename(path), dir="out", size=os.path.getsize(path), done=0, rate=0,
+                           status="active", time=int(time.time()), path=path, via=conn.name)
+            conn.send({"type": "file_offer", "fid": fid, "name": os.path.basename(path), "size": os.path.getsize(path),
+                       "mime": mimetypes.guess_type(path)[0] or "application/octet-stream"})
+        a = self.tx_active
+        conn = a["conn"]
+        if not conn.alive:
+            a["f"].close()
+            self.tx_active = None
+            return
+        while conn.backlog() < 16:
+            data = a["f"].read(CHUNK if conn is self.bt else 256 * 1024)
+            if data:
+                conn.send({"type": "file_chunk", "fid": a["fid"]}, data)
+                a["sent"] += len(data)
+                continue
+            a["f"].close()
+            conn.send({"type": "file_end", "fid": a["fid"]})
+            for tr in self.tx_track:
+                if tr["fid"] == a["fid"]:
+                    tr["end"] = conn.queued   # done once the socket has taken everything up to here
+            self.tx_active = None
+            GLib.idle_add(lambda: (self._pump(), False)[1])
+            break
+
+    def _track_tick(self):
+        """Progress of outgoing files, counted from bytes the socket really took."""
+        if getattr(self, "track_timer", None):
+            return
+        def tick():
+            for tr in list(self.tx_track):
+                c = tr["conn"]
+                delivered = max(0, min(tr["size"], c.written - tr["base"]))
+                secs = max(time.time() - tr["t0"], 0.001)
+                if not c.alive:
+                    self.tx_track.remove(tr)
+                    self._transfer(tr["fid"], status="failed")
+                elif tr["end"] is not None and c.written >= tr["end"]:
+                    self.tx_track.remove(tr)
+                    log(f"sent {tr['name']} over {c.name} ({tr['size'] / secs / 1e6:.2f} MB/s)")
+                    self._transfer(tr["fid"], status="done", done=tr["size"], rate=round(tr["size"] / secs))
+                    if c is self.fast and not self.tx_fast and not self.tx_active:
+                        self._maybe_close_fast()
+                else:
+                    self._transfer(tr["fid"], done=delivered, rate=round(delivered / secs), status="active")
+            if self.tx_track:
+                return True
+            self.track_timer = None
+            return False
+        self.track_timer = GLib.timeout_add(300, tick)
+
+    # the standing Wi-Fi Direct link (phone's Bluetooth off)
+    WIFI_CREDS = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "phonelink", "wifi.json")
+
+    def save_wifi_creds(self, m):
+        creds = {k: m.get(k) for k in ("ssid", "pass", "token", "addr", "port")}
+        try:
+            with open(self.WIFI_CREDS) as f:
+                if json.load(f) == creds:
+                    return
+        except (OSError, ValueError):
+            pass
+        os.makedirs(os.path.dirname(self.WIFI_CREDS), exist_ok=True)
+        fd = os.open(self.WIFI_CREDS + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(creds, f)
+        os.replace(self.WIFI_CREDS + ".tmp", self.WIFI_CREDS)
+        log("stored the phone's Wi-Fi link details")
+        self.state["wifiReady"] = self.wifi_ready()
+        self.write_state()
+
+    def wifi_ready(self):
+        return os.path.exists(self.WIFI_CREDS) and os.path.exists(HELPER)
+
+    def connect_wifi(self):
+        """A tap on "Connect" (shell or `phonelink wifi`): look for the phone's group for two minutes
+        and join it. Nothing looks for it otherwise."""
+        if self.bt:
+            return "already connected"
+        if not self.wifi_ready():
+            return "the phone has not shared its Wi-Fi link yet (connect over Bluetooth once)"
+        if getattr(self, "wifi_until", 0) > time.time():
+            return "ok"
+        self.wifi_until = time.time() + 120
+        self.state["wifiJoin"] = "looking"
+        self.write_state()
+
+        def look():
+            if self.bt or time.time() > self.wifi_until:
+                self.wifi_until = 0
+                self.state["wifiJoin"] = ""
+                self.write_state()
+                return False
+            if not getattr(self, "wifi_joining", False) and self.fast_state == "off":
+                with open(self.WIFI_CREDS) as f:
+                    creds = json.load(f)
+                self.wifi_joining = True
+                threading.Thread(target=self._try_wifi, args=(creds,), daemon=True).start()
+            return True
+
+        look()
+        GLib.timeout_add_seconds(6, look)
+        return "ok"
+
+    def _try_wifi(self, creds):
+        try:
+            seen = subprocess.run(["nmcli", "-t", "-f", "SSID", "dev", "wifi", "list", "--rescan", "yes"],
+                                  capture_output=True, text=True, timeout=30).stdout.splitlines()
+            if creds["ssid"] not in seen:
+                return
+            log("phone's Wi-Fi link seen, joining", creds["ssid"])
+            r = subprocess.run(["pkexec", HELPER, "up", creds["ssid"], creds["pass"], creds["addr"]],
+                               capture_output=True, text=True, timeout=40)
+            if r.returncode != 0 or not r.stdout.startswith("ok"):
+                log("joining the phone's Wi-Fi link failed:", (r.stdout or r.stderr).strip())
+                self.main_wifi_down()
+                return
+            s = None
+            for _ in range(10):
+                try:
+                    s = socket.create_connection((creds["addr"], int(creds["port"])), timeout=3)
+                    break
+                except OSError:
+                    time.sleep(0.5)
+            if s is None:
+                log("the phone did not answer on its Wi-Fi link")
+                self.main_wifi_down()
+                return
+            s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 << 20)
+            h = json.dumps({"type": "main_hello", "token": creds["token"]}).encode()
+            s.sendall(struct.pack(">I", len(h)) + h)
+            GLib.idle_add(self._wifi_attached, s)
+        except Exception as e:
+            log("Wi-Fi link:", e)
+            self.main_wifi_down()
+        finally:
+            self.wifi_joining = False
+
+    def _wifi_attached(self, s):
+        if self.bt:      # Bluetooth won the race
+            s.close()
+            self.main_wifi_down()
+            return False
+        self.wifi_until = 0
+        self.state["wifiJoin"] = ""
+        self.attach(s, "wi-fi direct", how="wi-fi")
+        return False
+
+    def main_wifi_down(self):
+        threading.Thread(target=lambda: subprocess.run(["pkexec", HELPER, "down"], capture_output=True, timeout=20),
+                         daemon=True).start()
+
+    # the Wi-Fi Direct lane
+    def _set_fast(self, s):
+        self.fast_state = s
+        self.state["fast"] = s
+        self.write_state()
+
+    def _open_fast(self):
+        if self.fast_state != "off":
+            return
+        self._set_fast("asking")
+        self.send({"type": "fast_request"})
+        self.fast_timer = GLib.timeout_add_seconds(30, self._fast_timeout)
+
+    def _fast_timeout(self):
+        self.fast_timer = None
+        if self.fast_state in ("asking", "joining"):
+            self._fast_failed("timed out")
+        return False
+
+    def _fast_failed(self, why):
+        log("fast lane failed:", why, "- using Bluetooth")
+        self.close_fast(why)
+        self.tx_slow += self.tx_fast
+        self.tx_fast = []
+        self._pump()
+
+    def _join_fast(self, m):
+        """Join the phone's group through the root helper (in a thread: it takes a few seconds)."""
+        if self.fast_state not in ("off", "asking"):
+            return
+        self._set_fast("joining")
+        ssid, pw, go, port, token = m.get("ssid", ""), m.get("pass", ""), m.get("addr", ""), int(m.get("port", 0)), m.get("token", "")
+
+        def work():
+            try:
+                r = subprocess.run(["pkexec", HELPER, "up", ssid, pw, go], capture_output=True, text=True, timeout=40)
+                out = (r.stdout or r.stderr).strip()
+                if r.returncode != 0 or not out.startswith("ok"):
+                    return GLib.idle_add(self._fast_failed, f"join: {out or r.returncode}")
+                s = None
+                for _ in range(10):
+                    try:
+                        s = socket.create_connection((go, port), timeout=3)
+                        break
+                    except OSError:
+                        time.sleep(0.5)
+                if s is None:
+                    return GLib.idle_add(self._fast_failed, "could not reach the phone")
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 << 20)
+                GLib.idle_add(self._fast_connected, s, token)
+            except Exception as e:
+                GLib.idle_add(self._fast_failed, str(e))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _fast_connected(self, s, token):
+        if self.fast_state != "joining":
+            s.close()
+            return False
+        if self.fast_timer:
+            GLib.source_remove(self.fast_timer)
+            self.fast_timer = None
+        self.fast = Conn(s, "wi-fi direct", self.handle, self._fast_closed, self._drained)
+        self.fast.send({"type": "fast_hello", "token": token})
+        self._set_fast("open")
+        log("fast lane open")
+        self._pump()
+        return False
+
+    def _fast_closed(self, conn, why):
+        if conn is self.fast:
+            self.fast = None
+            if self.tx_active and self.tx_active["conn"] is conn:
+                self.tx_active["f"].close()
+                self.tx_active = None
+            self.close_fast(why)
+
+    def _maybe_close_fast(self):
+        """Close the lane once neither side is sending on it."""
+        busy = self.tx_fast or (self.tx_active and self.tx_active["conn"] is self.fast) or self.rx_files
+        if self.fast_state == "open" and not busy:
+            GLib.timeout_add_seconds(3, lambda: (self._close_if_idle(), False)[1])
+
+    def _close_if_idle(self):
+        busy = self.tx_fast or (self.tx_active and self.tx_active["conn"] is self.fast) or self.rx_files \
+            or any(tr["conn"] is self.fast for tr in self.tx_track)
+        if self.fast_state == "open" and not busy and (not self.fast or not self.fast.outq):
+            self.close_fast("done")
+
+    def close_fast(self, why):
+        if self.fast_state == "off" and not self.fast:
+            return
+        log("fast lane closed:", why)
+        if self.fast_timer:
+            GLib.source_remove(self.fast_timer)
+            self.fast_timer = None
+        f, self.fast = self.fast, None
+        if f:
+            f.close(why)
+        self.send({"type": "fast_close"})
+        self._set_fast("off")
+        threading.Thread(target=lambda: subprocess.run(["pkexec", HELPER, "down"], capture_output=True, timeout=20),
+                         daemon=True).start()
+
+
+# ── BlueZ profile ────────────────────────────────────────────────────────────
+class Profile(dbus.service.Object):
+    def __init__(self, bus, link):
+        super().__init__(bus, PROFILE_PATH)
+        self.link = link
+
+    @dbus.service.method("org.bluez.Profile1", in_signature="", out_signature="")
+    def Release(self):
+        log("profile released")
+
+    @dbus.service.method("org.bluez.Profile1", in_signature="oha{sv}", out_signature="")
+    def NewConnection(self, device, fd, props):
+        fd = fd.take()
+        sock = socket.socket(fileno=fd)
+        # only phones that are paired with this laptop
+        try:
+            props = dbus.Interface(self.connection.get_object("org.bluez", device), "org.freedesktop.DBus.Properties")
+            paired = bool(props.Get("org.bluez.Device1", "Paired"))
+        except dbus.DBusException:
+            paired = False
+        if not paired:
+            log("refused unpaired device", device)
+            sock.close()
+            return
+        self.link.attach(sock, str(device))
+
+    @dbus.service.method("org.bluez.Profile1", in_signature="o", out_signature="")
+    def RequestDisconnection(self, device):
+        self.link.detach("requested by BlueZ")
+
+    @dbus.service.method("org.bluez.Profile1", in_signature="", out_signature="")
+    def Cancel(self):
+        pass
+
+
+# ── session D-Bus object (Dolphin's service menu asks it whether to show "Send to phone") ──
+class Bus(dbus.service.Object):
+    def __init__(self, bus, link):
+        self.name = dbus.service.BusName("dev.apassie.PhoneLink", bus)
+        super().__init__(bus, "/dev/apassie/PhoneLink")
+        self.link = link
+
+    @dbus.service.method("dev.apassie.PhoneLink", in_signature="", out_signature="b")
+    def Connected(self):
+        return bool(self.link.bt)
+
+
+# ── local control socket ─────────────────────────────────────────────────────
+def serve_control(link):
+    try:
+        os.unlink(CONTROL)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(CONTROL)
+    os.chmod(CONTROL, 0o600)
+    srv.listen(4)
+    srv.setblocking(False)
+
+    def accept(fd, cond):
+        try:
+            c, _ = srv.accept()
+        except BlockingIOError:
+            return True
+        c.settimeout(2)
+        try:
+            req = json.loads(c.makefile().readline() or "{}")
+            cmd = req.get("cmd")
+            if cmd == "send":
+                res = [link.queue_file(p) for p in req.get("paths", [])]
+                reply = {"ok": all(r == "ok" for r in res), "results": res}
+            elif cmd == "clip":
+                ok = link.send({"type": "clip", "text": link.clip.current()})
+                reply = {"ok": ok}
+            elif cmd == "wifi":
+                res = link.connect_wifi()
+                reply = {"ok": res == "ok", "result": res}
+            elif cmd == "call":
+                ok = link.send({"type": "call_action", "action": req.get("action", "")})
+                reply = {"ok": ok}
+            else:
+                reply = dict(link.state, ok=True)
+            c.sendall((json.dumps(reply) + "\n").encode())
+        except Exception as e:
+            try:
+                c.sendall((json.dumps({"ok": False, "error": str(e)}) + "\n").encode())
+            except OSError:
+                pass
+        finally:
+            c.close()
+        return True
+
+    GLib.io_add_watch(srv.fileno(), GLib.IO_IN, accept)
+    return srv
+
+
+def main():
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    system = dbus.SystemBus()
+    session = dbus.SessionBus()
+    link = Link(session)
+    link.desktop = Desktop(session, link)
+    link.clip = Clipboard(link)
+    busobj = Bus(session, link)  # noqa: F841
+    profile = Profile(system, link)  # noqa: F841 (kept alive by the bus)
+    manager = dbus.Interface(system.get_object("org.bluez", "/org/bluez"), "org.bluez.ProfileManager1")
+    manager.RegisterProfile(PROFILE_PATH, SERVICE_UUID, {
+        "Name": "PhoneLink",
+        "Role": "server",
+        # A fixed channel: with BlueZ choosing one itself, the phone's connections never arrived.
+        "Channel": dbus.UInt16(22),
+        "RequireAuthentication": dbus.Boolean(True),
+        "RequireAuthorization": dbus.Boolean(False),
+        "AutoConnect": dbus.Boolean(True),
+    })
+    control = serve_control(link)  # noqa: F841
+    log("waiting for the phone (service", SERVICE_UUID + ")")
+    GLib.timeout_add_seconds(60, lambda: (link.send({"type": "ping"}), True)[1])
+    link.state["wifiReady"] = link.wifi_ready()
+    link.write_state()
+    loop = GLib.MainLoop()
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        link.detach("daemon stopping")
+        try:
+            manager.UnregisterProfile(PROFILE_PATH)
+        except dbus.DBusException:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/allfiles;
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+Actions=send
+X-KDE-Priority=TopLevel
+# shown only while the phone is linked (asks phonelinkd over D-Bus)
+X-KDE-ShowIfDBusCall=dev.apassie.PhoneLink /dev/apassie/PhoneLink dev.apassie.PhoneLink Connected
+
+[Desktop Action send]
+Name=Send to phone
+Icon=smartphone
+Exec=/home/shanks/.local/bin/phonelink send %F

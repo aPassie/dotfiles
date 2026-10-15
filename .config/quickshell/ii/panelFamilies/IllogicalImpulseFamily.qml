@@ -21,4 +21,7 @@ Scope {
     PanelLoader { component: GlassAppMenu {} }
     PanelLoader { component: GlassClaudePanel {} }
     PanelLoader { component: GlassClaudeNotice {} }
+    PanelLoader { component: GlassPhonePanel {} }
+    PanelLoader { component: GlassCallPopup {} }
+    PanelLoader { component: GlassPhoneTransfer {} }
 }

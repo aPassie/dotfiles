@@ -146,7 +146,7 @@ Scope {
                     y: -m
                     width: card.width + m * 2
                     height: card.height + m * 2
-                    fragmentShader: Qt.resolvedUrl("shaders/pane.v3.frag.qsb")
+                    fragmentShader: Qt.resolvedUrl("shaders/pane.v5.frag.qsb")
                     property vector4d tint: Qt.vector4d(GlassBackdrop.tint.r, GlassBackdrop.tint.g, GlassBackdrop.tint.b, 0.66)
                     property vector2d size: Qt.vector2d(width, height)
                     property real margin: m

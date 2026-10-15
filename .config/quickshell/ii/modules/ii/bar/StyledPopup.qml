@@ -68,7 +68,7 @@ LazyLoader {
 
         ShaderEffect {
             anchors.fill: parent
-            fragmentShader: Qt.resolvedUrl("../glassbar/shaders/pane.v3.frag.qsb")
+            fragmentShader: Qt.resolvedUrl("../glassbar/shaders/pane.v5.frag.qsb")
             property vector4d tint: Qt.vector4d(GlassBackdrop.tint.r, GlassBackdrop.tint.g, GlassBackdrop.tint.b, 0.66)
             property vector2d size: Qt.vector2d(width, height)
             property real margin: popupWindow.gm

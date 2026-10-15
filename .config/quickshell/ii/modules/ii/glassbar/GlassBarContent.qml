@@ -495,6 +495,37 @@ Item {
                     GlassHoverSense { id: btSense }
                     GlassBluetoothPopup { hoverTarget: btSense }
                 }
+                Item { // the phone (PhoneLink, ~/phonelink): white when connected, dim when it can be reached over Wi-Fi
+                    id: phoneIcon
+                    visible: PhoneLink.connected || PhoneLink.wifiReady
+                    opacity: PhoneLink.connected ? 1 : 0.4
+                    width: phoneRow.implicitWidth
+                    height: parent.height
+                    scale: phoneSense.hovered ? 1.12 : 1
+                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                    Row {
+                        id: phoneRow
+                        height: parent.height
+                        spacing: 3
+                        Glyph {
+                            height: parent.height
+                            font.pixelSize: 14
+                            code: 0x1007DC // SF "iphone"-style handset
+                            color: PhoneLink.call === "ringing" ? "#ffb224" : root.ink
+                        }
+                        Label {
+                            visible: PhoneLink.battery >= 0 && PhoneLink.battery < 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0
+                            text: PhoneLink.battery + "%"
+                        }
+                    }
+                    TapHandler { margin: 6; onTapped: GlassPanels.toggle("phone") }
+                    GlassHoverSense { id: phoneSense }
+                    GlassPhonePopup { hoverTarget: phoneSense }
+                }
                 Glyph {
                     height: parent.height
                     visible: Audio.sink?.audio?.muted ?? false

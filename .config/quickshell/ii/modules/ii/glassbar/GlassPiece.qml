@@ -16,7 +16,7 @@ Item {
         y: -m
         width: root.width + m * 2
         height: root.height + m * 2
-        fragmentShader: Qt.resolvedUrl("shaders/pane.v3.frag.qsb")
+        fragmentShader: Qt.resolvedUrl("shaders/pane.v5.frag.qsb")
         property vector4d tint: Qt.vector4d(root.fill.r, root.fill.g, root.fill.b, root.tintStrength)
         property vector2d size: Qt.vector2d(width, height)
         property real margin: m
