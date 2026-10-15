@@ -73,7 +73,7 @@ GlassPanel {
             color: Qt.rgba(1, 1, 1, 0.66)
             font.pixelSize: 12
             font.weight: Font.Normal
-            text: Translation.tr("On the phone, tap Connect over Wi-Fi in PhoneLink or its Quick Settings tile. Bluetooth reconnects by itself when it is on.")
+            text: Translation.tr("On the phone, tap Connect over Wi-Fi in Kinlink or its Quick Settings tile. Bluetooth reconnects by itself when it is on.")
         }
 
         Row {

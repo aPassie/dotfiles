@@ -106,7 +106,8 @@ git diff --stat && git commit -am "..." && git push
 - Browser profiles, application data, caches.
 - A few personal scripts and their key binds, stripped by `tools/sync-from-home.sh` using a
   local, uncommitted list.
-- PhoneLink's Android app and its Wi-Fi Direct root helper: they live in their own project.
+- Kinlink's Android app and its Wi-Fi Direct root helper: they live in their own repository,
+  [aPassie/kinlink](https://github.com/aPassie/kinlink) (private).
   This repository has only the laptop side (`phonelinkd`, `phonelink`, the user service, the
   shell's phone icon, panel and call pop-up, and Dolphin's "Send to phone").
 - The speech model and Python environment for dictation (`~/.local/share/ptt/.venv`); only

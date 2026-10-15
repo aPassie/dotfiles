@@ -148,7 +148,7 @@ class Desktop:
     def toast(self, title, body, action=None):
         actions = dbus.Array([action[0], action[1]] if action else [], signature="s")
         try:
-            return int(self.n.Notify("PhoneLink", dbus.UInt32(0), "phone", title, body, actions,
+            return int(self.n.Notify("Kinlink", dbus.UInt32(0), "phone", title, body, actions,
                                      {"desktop-entry": dbus.String("phonelink")}, dbus.Int32(-1)))
         except dbus.DBusException:
             return 0
@@ -926,7 +926,7 @@ def main():
     profile = Profile(system, link)  # noqa: F841 (kept alive by the bus)
     manager = dbus.Interface(system.get_object("org.bluez", "/org/bluez"), "org.bluez.ProfileManager1")
     manager.RegisterProfile(PROFILE_PATH, SERVICE_UUID, {
-        "Name": "PhoneLink",
+        "Name": "Kinlink",
         "Role": "server",
         # A fixed channel: with BlueZ choosing one itself, the phone's connections never arrived.
         "Channel": dbus.UInt16(22),
