@@ -23,6 +23,7 @@ Scope {
     onPresentChanged: if (!present) leaveTimer.restart()
     Timer { id: leaveTimer; interval: 260; onTriggered: if (!root.present) root.items = [] }
     readonly property real barH: Appearance.sizes.baseBarHeight
+    property int replies: 0 // cards with the reply field open
 
     PanelWindow {
         id: win
@@ -34,7 +35,9 @@ Scope {
         exclusiveZone: 0
         WlrLayershell.namespace: "quickshell:glass"
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand // the reply field
+        // Keys only while a reply is being typed: niri focuses an on-demand surface as soon as it
+        // maps, so a plain popup would take focus from the window being worked in.
+        WlrLayershell.keyboardFocus: root.replies > 0 ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
         anchors {
             top: true
             right: true
@@ -104,6 +107,8 @@ Scope {
                         }
                         Timer { id: leave; interval: 2500; onTriggered: if (!card.replying) Notifications.timeoutNotification(card.modelData.notificationId) }
                         property bool replying: false
+                        onReplyingChanged: root.replies += replying ? 1 : -1
+                        Component.onDestruction: if (replying) root.replies -= 1
                         function send() {
                             const text = field.text.trim()
                             if (text.length === 0) return

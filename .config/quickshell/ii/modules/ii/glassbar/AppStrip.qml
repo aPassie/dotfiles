@@ -54,7 +54,7 @@ Item {
     }
 
     // [{ sep: true } | { appId, name, ids: [windowId], titles, focused: index or -1, urgent, tray: item or null }]
-    readonly property var model: {
+    readonly property var liveModel: {
         const wss = Niri.workspacesForOutput(root.output)
         const out = []
         for (let i = 0; i < wss.length; i++) {
@@ -99,6 +99,18 @@ Item {
         }
         if (background.length > 0 && out.length > 0) out.push({ sep: true })
         return out.concat(background)
+    }
+    // What the icons are drawn from. Window titles change constantly (terminal spinners), and a new
+    // model rebuilds every icon, which drops clicks mid-press, so only take it when the strip itself changes.
+    property var model: []
+    property string modelKey: ""
+    onLiveModelChanged: takeModel()
+    Component.onCompleted: takeModel()
+    function takeModel() {
+        const key = liveModel.map(m => m.sep ? "|" : [m.appId, m.name ?? "", m.ids.join(","), m.focused, m.urgent, m.tray?.id ?? "", m.unknown === true].join(";")).join("\n")
+        if (key === modelKey) return
+        modelKey = key
+        model = liveModel
     }
     readonly property int appCount: model.filter(m => !m.sep).length
     readonly property bool empty: appCount === 0
@@ -170,7 +182,7 @@ Item {
         const m = model[i]
         if (!m || m.sep) return
         GlassPanels.showAppMenu({
-            appId: m.appId, name: nameOf(m), ids: m.ids, titles: m.titles, focused: m.focused,
+            appId: m.appId, name: nameOf(m), ids: m.ids, titles: m.ids.map(id => Niri.windows.find(w => w.id === id)?.title || ""), focused: m.focused,
             tray: m.tray ?? null, icon: iconSources[i] ?? ""
         }, root.mapToItem(null, itemX(i) + (slot + (extras[i] ?? 0)) / 2, 0).x)
     }
